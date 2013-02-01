@@ -343,6 +343,7 @@ Codecs:
   --disable-ladspa          disable LADSPA plugin support [autodetect]
   --disable-libbs2b         disable libbs2b audio filter support [autodetect]
   --disable-mpg123          disable libmpg123 MP3 decoding support [autodetect]
+  --disable-libxmp          disable libxmp support [autodetect]
 
 Video output:
   --enable-gl              enable OpenGL video output [autodetect]
@@ -440,6 +441,7 @@ _jack=auto
 _openal=no
 _libcdio=auto
 _mpg123=auto
+_libxmp=auto
 _ladspa=auto
 _libbs2b=auto
 _vcd=auto
@@ -624,6 +626,8 @@ for ac_option do
   --disable-libcdio)    _libcdio=no     ;;
   --enable-mpg123)      _mpg123=yes     ;;
   --disable-mpg123)     _mpg123=no      ;;
+  --enable-libxmp)      _libxmp=yes     ;;
+  --disable-libxmp)     _libxmp=no      ;;
   --enable-ladspa)      _ladspa=yes     ;;
   --disable-ladspa)     _ladspa=no      ;;
   --enable-libbs2b)     _libbs2b=yes    ;;
@@ -2609,6 +2613,23 @@ fi
 echores "$_mpg123"
 
 
+echocheck "libxmp support"
+def_libxmp='#undef CONFIG_LIBXMP'
+if test "$_libxmp" = auto; then
+  _libxmp=no
+  pkg_config_add 'libxmp >= 3.9.4' && _libxmp=yes
+fi
+if test "$_libxmp" = yes ; then
+  # the .pc file is buggy
+  libs_mplayer="$libs_mplayer -lxmp"
+  def_libxmp='#define CONFIG_LIBXMP 1'
+  codecmodules="libxmp $codecmodules"
+else
+  nocodecmodules="libxmp $nocodecmodules"
+fi
+echores "$_libxmp"
+
+
 echocheck "LADSPA plugin support"
 if test "$_ladspa" = auto ; then
   _ladspa=no
@@ -3122,6 +3143,7 @@ MACOSX_FINDER = $_macosx_finder
 MACOSX_BUNDLE = $_macosx_bundle
 MNG = $_mng
 MPG123 = $_mpg123
+LIBXMP = $_libxmp
 NETWORKING = $networking
 OPENAL = $_openal
 OSS = $_ossaudio
@@ -3263,6 +3285,7 @@ $def_vcd
 
 /* codec libraries */
 $def_mpg123
+$def_libxmp
 $def_zlib
 
 $def_libpostproc

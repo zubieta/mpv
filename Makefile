@@ -52,6 +52,7 @@ SOURCES-$(COCOA)                += video/out/osx_common.m \
                                    osdep/cocoa_events.m
 SOURCES-$(MNG)                  += demux/demux_mng.c
 SOURCES-$(MPG123)               += audio/decode/ad_mpg123.c
+SOURCES-$(LIBXMP)               += demux/demux_libxmp.c
 
 SOURCES-$(NEED_GETTIMEOFDAY)    += osdep/gettimeofday.c
 SOURCES-$(NEED_GLOB)            += osdep/glob-win.c

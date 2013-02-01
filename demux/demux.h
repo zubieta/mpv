@@ -45,6 +45,7 @@ struct MPOpts;
 
 enum demuxer_type {
     DEMUXER_TYPE_UNKNOWN = 0,
+    DEMUXER_TYPE_GENERIC,
     DEMUXER_TYPE_MPEG_PS,
     DEMUXER_TYPE_AVI,
     DEMUXER_TYPE_AVI_NI,

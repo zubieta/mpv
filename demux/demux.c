@@ -65,6 +65,7 @@ extern const demuxer_desc_t demuxer_desc_mpeg_es;
 extern const demuxer_desc_t demuxer_desc_mpeg4_es;
 extern const demuxer_desc_t demuxer_desc_h264_es;
 extern const demuxer_desc_t demuxer_desc_mpeg_ts;
+extern const demuxer_desc_t demuxer_desc_libxmp;
 
 /* Please do not add any new demuxers here. If you want to implement a new
  * demuxer, add it to libavformat, except for wrappers around external
@@ -92,6 +93,9 @@ const demuxer_desc_t *const demuxer_list[] = {
     &demuxer_desc_mpeg4_es,
     &demuxer_desc_h264_es,
     &demuxer_desc_mpeg_ts,
+#ifdef CONFIG_LIBXMP
+    &demuxer_desc_libxmp,
+#endif
     // auto-probe last, because it checks file-extensions only
     &demuxer_desc_mf,
     /* Please do not add any new demuxers here. If you want to implement a new
