@@ -42,23 +42,22 @@ static demuxer_t* demux_libxmp_open(demuxer_t* demuxer) {
         return NULL;
     }
 
-    demuxer->priv = c;
-
     sh_audio = new_sh_audio(demuxer,0);
-    sh_audio->format = MKTAG('M', 'P', 'a', 'f');
+    sh_audio->gsh->codec = "mp-pcm";
+    sh_audio->format = AF_FORMAT_S16_NE;
     sh_audio->wf = w = calloc(1, sizeof(*w));
-    w->wFormatTag = AF_FORMAT_S16_NE;
     w->nChannels = 2;
     w->nSamplesPerSec = SAMPLERATE;
     w->nAvgBytesPerSec = SAMPLERATE * 2 * 2;
     w->nBlockAlign = 2 * 2;
     w->wBitsPerSample = 8 * 2;
 
-    demuxer->audio->id = 0;
-    demuxer->audio->sh = sh_audio;
-    sh_audio->ds = demuxer->audio;
+    if (xmp_start_player(c, SAMPLERATE, 0) != 0) {
+        xmp_free_context(c);
+        return NULL;
+    }
 
-    xmp_player_start(c, SAMPLERATE, 0);
+    demuxer->priv = c;
 
     return demuxer;
 }
@@ -66,19 +65,22 @@ static demuxer_t* demux_libxmp_open(demuxer_t* demuxer) {
 static int demux_libxmp_fill_buffer(demuxer_t* demuxer, demux_stream_t *ds) {
     xmp_context c = demuxer->priv;
 
-    if (xmp_player_frame(c) != 0)
+    if (xmp_play_frame(c) != 0)
         return 0;
 
-    struct xmp_module_info mi;
-    xmp_player_get_info(c, &mi);
+    struct xmp_frame_info fi;
+    xmp_get_frame_info(c, &fi);
 
-    if (mi.loop_count > 0)
+    if (fi.loop_count > 0)
         return 0;
 
-    demux_packet_t*  dp = new_demux_packet(mi.buffer_size);
-    memcpy(dp->buffer, mi.buffer, mi.buffer_size);
+    if (fi.buffer_size == 0)
+        return 0;
 
-    dp->pts = mi.time / 1000.0;
+    demux_packet_t *dp = new_demux_packet(fi.buffer_size);
+    memcpy(dp->buffer, fi.buffer, fi.buffer_size);
+
+    dp->pts = fi.time / 1000.0;
     dp->pos = 0; // ?
 
     ds_add_packet(ds, dp);
@@ -90,11 +92,11 @@ static void demux_libxmp_seek(demuxer_t *demuxer, float rel_seek_secs,
                               float audio_delay, int flags)
 {
     xmp_context c = demuxer->priv;
-    struct xmp_module_info mi;
-    xmp_player_get_info(c, &mi);
+    struct xmp_frame_info fi;
+    xmp_get_frame_info(c, &fi);
 
-    double pos = mi.time / 1000.0;
-    double len = mi.total_time / 1000.0;
+    double pos = fi.time / 1000.0;
+    double len = fi.total_time / 1000.0;
 
     double base = (flags & SEEK_ABSOLUTE) ? 0 : pos;
     double time;
@@ -110,15 +112,12 @@ static void demux_libxmp_seek(demuxer_t *demuxer, float rel_seek_secs,
 static int demux_libxmp_control(demuxer_t * demuxer, int cmd, void * arg)
 {
     xmp_context c = demuxer->priv;
-    struct xmp_module_info mi;
-    xmp_player_get_info(c, &mi);
+    struct xmp_frame_info fi;
+    xmp_get_frame_info(c, &fi);
 
     switch (cmd) {
     case DEMUXER_CTRL_GET_TIME_LENGTH:
-        *(double *)arg = mi.total_time / 1000.0;
-        return DEMUXER_CTRL_OK;
-    case DEMUXER_CTRL_GET_PERCENT_POS:
-        *(int *)arg = 100.0 * mi.time / mi.total_time;
+        *(double *)arg = fi.total_time / 1000.0;
         return DEMUXER_CTRL_OK;
     default:
         return DEMUXER_CTRL_NOTIMPL;
@@ -129,8 +128,11 @@ static void demux_libxmp_close(struct demuxer *demuxer)
 {
     xmp_context c = demuxer->priv;
 
-    if (c)
+    if (c) {
+        xmp_end_player(c);
+        xmp_release_module(c);
         xmp_free_context(c);
+    }
 }
 
 const demuxer_desc_t demuxer_desc_libxmp = {

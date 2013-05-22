@@ -2595,11 +2595,10 @@ echocheck "libxmp support"
 def_libxmp='#undef CONFIG_LIBXMP'
 if test "$_libxmp" = auto; then
   _libxmp=no
-  pkg_config_add 'libxmp >= 3.9.4' && _libxmp=yes
+  pkg_config_add 'libxmp >= 4.1.4' && _libxmp=yes
 fi
 if test "$_libxmp" = yes ; then
   # the .pc file is buggy
-  libs_mplayer="$libs_mplayer -lxmp"
   def_libxmp='#define CONFIG_LIBXMP 1'
   codecmodules="libxmp $codecmodules"
 else
