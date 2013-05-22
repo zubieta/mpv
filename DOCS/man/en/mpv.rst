@@ -49,7 +49,7 @@ INTERACTIVE CONTROL
 
 mpv has a fully configurable, command-driven control layer which allows you
 to control mpv using keyboard, mouse, joystick or remote control (with
-LIRC). See the ``--input`` option for ways to customize it.
+LIRC). See the ``--input-`` options for ways to customize it.
 
 keyboard control
 ----------------
@@ -89,6 +89,10 @@ p / SPACE
 
 q / ESC
     Stop playing and quit.
+
+Q
+    Like ``q``, but store the current playback position. Playing the same file
+    later will resume at the old playback position if possible.
 
 U
     Stop playing (and quit if ``--idle`` is not used).
@@ -142,9 +146,6 @@ j and J
 F
     Toggle displaying "forced subtitles".
 
-a
-    Toggle subtitle alignment: top / middle / bottom.
-
 x and z
     Adjust subtitle delay by +/- 0.1 seconds.
 
@@ -190,7 +191,7 @@ corresponding adjustment, or the software equalizer (``--vf=eq``).)
     Adjust brightness.
 
 5 and 6
-    Adjust hue.
+    Adjust gamma.
 
 7 and 8
     Adjust saturation.
@@ -279,11 +280,11 @@ the *XXX* option or if *XXX* is compiled in.
   GUIs.
 | It has the following format:
 | %n%string\_of\_length\_n
-| *EXAMPLES*:
-| `mpv --ao pcm:file=%10%C:test.wav test.avi`
-| Or in a script:
-| `mpv --ao pcm:file=%\`expr length "$NAME"\`%"$NAME" test.avi`
 
+| *EXAMPLES*:
+| `mpv --ao=pcm:file=%10%C:test.wav test.avi`
+| Or in a script:
+| `mpv --ao=pcm:file=%\`expr length "$NAME"\`%"$NAME" test.avi`
 
 Per-file options
 ----------------
@@ -330,6 +331,9 @@ The option ``--a`` is never reset here.
 CONFIGURATION FILES
 ===================
 
+Location and syntax
+-------------------
+
 You can put all of the options in configuration files which will be read every
 time mpv is run. The system-wide configuration file 'mpv.conf' is in
 your configuration directory (e.g. ``/etc/mpv`` or
@@ -339,6 +343,34 @@ command line override either. The syntax of the configuration files is
 ``option=<value>``, everything after a *#* is considered a comment. Options
 that work without values can be enabled by setting them to *yes* and disabled by
 setting them to *no*. Even suboptions can be specified in this way.
+
+*EXAMPLE CONFIGURATION FILE:*
+
+| # Use opengl video output by default.
+| vo=opengl
+| # Use quotes for text that can contain spaces:
+| status-msg="Time: ${time-pos}"
+
+Putting command line options into the configuration file
+--------------------------------------------------------
+
+Almost all command line options can be put into the configuration file. Here
+is a small guide:
+
++----------------------+--------------------------+
+| Option               | Configuration file entry |
++======================+==========================+
+| --flag               | flag                     |
++----------------------+--------------------------+
+| -opt val             | opt=val                  |
++----------------------+--------------------------+
+| --opt=val            | opt=val                  |
++----------------------+--------------------------+
+| -opt "has spaces"    | opt="has spaces"         |
++----------------------+--------------------------+
+
+File specific configuration files
+---------------------------------
 
 You can also write file-specific configuration files. If you wish to have a
 configuration file for a file called 'movie.avi', create a file named
@@ -352,21 +384,9 @@ file-specific configuration is loaded from ``~/.mpv``. In addition, the
 For this, mpv first tries to load a mpv.conf from the same directory
 as the file played and then tries to load any file-specific configuration.
 
-*EXAMPLE MPV CONFIGURATION FILE:*
 
-| # Use opengl video output by default.
-| vo=opengl
-| # I love practicing handstands while watching videos.
-| flip=yes
-| # Decode multiple files from PNG,
-| # start with mf://filemask
-| mf=type=png:fps=25
-| # Eerie negative images are cool.
-| vf=eq=1.0:-0.8
-
-
-PROFILES
-========
+Profiles
+--------
 
 To ease working with different configurations profiles can be defined in the
 configuration files. A profile starts with its name between square brackets,
@@ -377,6 +397,10 @@ option. To end the profile, start another one or use the profile name
 
 *EXAMPLE MPV PROFILE:*
 
+| [vo.vdpau]
+| # Use hardware decoding (this might break playback of some h264 files)
+| hwdec=vdpau
+|
 | [protocol.dvd]
 | profile-desc="profile for dvd:// streams"
 | vf=pp=hb/vb/dr/al/fd
@@ -565,7 +589,7 @@ FILES
     mpv user settings
 
 ``~/.mpv/input.conf``
-    input bindings (see ``--input=keylist`` for the full list)
+    input bindings (see ``--input-keylist`` for the full list)
 
 ``~/.mpv/DVDkeys/``
     cached CSS keys

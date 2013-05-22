@@ -21,6 +21,9 @@
 
 #include <stdbool.h>
 
+#include "codec_tags.h"
+
+#include "audio/chmap.h"
 #include "aviheader.h"
 #include "ms_hdr.h"
 struct MPOpts;
@@ -40,26 +43,31 @@ struct sh_stream {
     struct demuxer *demuxer;
     // Index into demuxer->streams.
     int index;
-    // The (possibly) type specific id, e.g. aid or sid.
-    int tid;
     // Index into stream array (currently one array per type, e.g. a_streams).
     int stream_index;
-    // Demuxer specific ID (always set, defaults to tid).
+    // Demuxer/format specific ID. Corresponds to the stream IDs as encoded in
+    // some file formats (e.g. MPEG), or an index chosen by demux.c.
     int demuxer_id;
-    // Abomination.
-    struct sh_common *common_header;
     // One of these is non-NULL, the others are NULL, depending on the stream
     // type.
     struct sh_audio *audio;
     struct sh_video *video;
     struct sh_sub *sub;
 
-    // Work around other hacks.
-    int lavf_codec_tag;
+    // E.g. "h264" (usually corresponds to AVCodecDescriptor.name)
+    const char *codec;
+
+    // Codec specific header data (set by demux_lavf.c)
+    // Other demuxers use sh_audio->wf and sh_video->bih instead.
+    struct AVCodecContext *lav_headers;
 
     char *title;
+    char *lang;                 // language code
     bool default_track;         // container default track flag
     bool attached_picture;      // stream is a picture (such as album art)
+
+    // Human readable description of the running decoder, or NULL
+    char *decoder_desc;
 
     // shouldn't exist type of stuff
     struct MPOpts *opts;
@@ -68,42 +76,29 @@ struct sh_stream {
 
 #define SH_COMMON                                                       \
     struct sh_stream *gsh;                                              \
-    const char *demuxer_codecname;                                      \
     struct MPOpts *opts;                                                \
     struct demux_stream *ds;                                            \
-    struct codecs *codec;                                               \
+    /* usually a FourCC, exact meaning depends on gsh->format */        \
     unsigned int format;                                                \
-    int libav_codec_id;                                                 \
     int initialized;                                                    \
     /* number of seconds stream should be delayed                       \
      * (according to dwStart or similar) */                             \
     float stream_delay;                                                 \
-    /* things needed for parsing */                                     \
-    bool needs_parsing;                                                 \
-    struct AVCodecContext *avctx;                                       \
-    struct AVCodecParserContext *parser;                                \
     /* audio: last known pts value in output from decoder               \
      * video: predicted/interpolated PTS of the current frame */        \
     double pts;                                                         \
     /* decoder context */                                               \
     void *context;                                                      \
-    const char *codecname;                                              \
-    char *lang;   /* track language */                                  \
-
-typedef struct sh_common {
-    SH_COMMON
-} sh_common_t;
 
 typedef struct sh_audio {
     SH_COMMON
-    int aid;
     // output format:
     int sample_format;
     int samplerate;
     int container_out_samplerate;
     int samplesize;
-    int channels;
-    int o_bps; // == samplerate*samplesize*channels   (uncompr. bytes/sec)
+    struct mp_chmap channels;
+    int o_bps; // == samplerate*samplesize*channels.num   (uncompr. bytes/sec)
     int i_bps; // == bitrate  (compressed bytes/sec)
     // in buffers:
     int audio_in_minsize;   // initial size to allocate for a_in_buffer if any
@@ -124,15 +119,14 @@ typedef struct sh_audio {
     unsigned char *codecdata;
     int codecdata_len;
     int pts_bytes;   // bytes output by decoder after last known pts
+    /* things needed for parsing */
+    bool needs_parsing;
+    struct AVCodecContext *avctx;
+    struct AVCodecParserContext *parser;
 } sh_audio_t;
 
 typedef struct sh_video {
     SH_COMMON
-    int vid;
-    float timer;     // absolute time in video stream, since last start/seek
-    // frame counters:
-    float num_frames;       // number of frames played
-    int num_frames_decoded; // number of frames decoded
     double i_pts;   // PTS for the _next_ I/P frame (internal mpeg demuxing)
     float next_frame_time;
     double last_pts;
@@ -154,7 +148,6 @@ typedef struct sh_video {
     int disp_w, disp_h;   // display size (filled by demuxer)
     int colorspace;       // mp_csp
     int color_range;      // mp_csp_levels
-    int imgfmt;           // raw video image format
     // output driver/filters: (set by libmpcodecs core)
     unsigned int outfmt;
     struct vf_instance *vfilter;  // video filter chain
@@ -168,8 +161,6 @@ typedef struct sh_video {
 
 typedef struct sh_sub {
     SH_COMMON
-    int sid;
-    char type;  // t = text, v = VobSub, a = SSA/ASS, m, x, b, d, p
     bool active; // after track switch decoder may stay initialized, not active
     unsigned char *extradata;   // extra header data passed from demuxer
     int extradata_len;
@@ -185,8 +176,7 @@ struct sh_video *new_sh_video_vid(struct demuxer *demuxer, int id, int vid);
 struct sh_sub *new_sh_sub_sid(struct demuxer *demuxer, int id, int sid);
 struct sh_sub *new_sh_sub_sid_lang(struct demuxer *demuxer, int id, int sid,
                                    const char *lang);
-
-const char *sh_sub_type2str(int type);
+struct sh_stream *new_sh_stream(struct demuxer *demuxer, enum stream_type type);
 
 // video.c:
 int video_read_properties(struct sh_video *sh_video);

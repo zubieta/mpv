@@ -437,8 +437,8 @@ static demuxer_t * demux_mng_open(demuxer_t * demuxer)
     sh_video->ds = demuxer->video;
 
     // set format of pixels in video packets
-    sh_video->format = MP_FOURCC_RAWVIDEO;
-    sh_video->imgfmt = MP_FOURCC_RGB32;
+    sh_video->gsh->codec = "rawvideo";
+    sh_video->format = MP_FOURCC_RGB32;
 
     // set framerate to some value (MNG does not have a fixed framerate)
     sh_video->fps       = 5.0f;
@@ -583,18 +583,6 @@ static int demux_mng_control(demuxer_t * demuxer, int cmd, void * arg)
       case DEMUXER_CTRL_GET_TIME_LENGTH:
           if (mng_priv->header_processed) {
               *(double *)arg = (double)mng_priv->total_time_ms / 1000.0;
-              return DEMUXER_CTRL_OK;
-          } else {
-              return DEMUXER_CTRL_DONTKNOW;
-          }
-          break;
-
-      // get position in movie
-      case DEMUXER_CTRL_GET_PERCENT_POS:
-          if (mng_priv->header_processed && mng_priv->total_time_ms > 0) {
-              *(int *)arg = (100 * mng_priv->show_cur_time_ms
-                             + mng_priv->total_time_ms / 2)
-                            / mng_priv->total_time_ms;
               return DEMUXER_CTRL_OK;
           } else {
               return DEMUXER_CTRL_DONTKNOW;

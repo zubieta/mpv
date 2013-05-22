@@ -282,6 +282,7 @@ static void new_audio_stream(demuxer_t *demux, int aid){
     if((aid & 0xC0) == 0xC0) sh_a->format=0x2000;
     else if(aid >= 0x98 && aid <= 0x9f) sh_a->format=0x2001;
     if (mpg_d) mpg_d->a_stream_ids[mpg_d->num_a_streams++] = aid;
+    mp_set_audio_codec_from_tag(sh_a);
   }
   if(demux->audio->id==-1) demux->audio->id=aid;
 }
@@ -487,6 +488,7 @@ static int demux_mpg_read_packet(demuxer_t *demux,int id){
         if(priv && ds->sh) {
           sh_video_t *sh = (sh_video_t *)ds->sh;
           sh->format = mmioFOURCC('W', 'V', 'C', '1');
+          mp_set_video_codec_from_tag(sh);
         }
       }
     }
@@ -521,7 +523,7 @@ static int demux_mpg_read_packet(demuxer_t *demux,int id){
 
         if(!demux->s_streams[aid]){
             sh_sub_t *sh = new_sh_sub(demux, aid);
-            if (sh) sh->type = 'v';
+            if (sh) sh->gsh->codec = "dvd_subtitle";
             mp_msg(MSGT_DEMUX,MSGL_V,"==> Found subtitle: %d\n",aid);
         }
 
@@ -570,6 +572,7 @@ static int demux_mpg_read_packet(demuxer_t *demux,int id){
           len-=3;
           if(len<=0) mp_msg(MSGT_DEMUX,MSGL_V,"End of packet while searching for PCM header\n");
           dvdpcm_header((sh_audio_t*)(ds->sh));
+          mp_set_audio_codec_from_tag((sh_audio_t*)(ds->sh));
         }
 //        printf("  \n");
       } //  if(demux->audio->id==aid)
@@ -604,6 +607,7 @@ static int demux_mpg_read_packet(demuxer_t *demux,int id){
           sh->format = priv->es_map[id - 0x1B0];
           mp_dbg(MSGT_DEMUX,MSGL_DBG2,"ASSIGNED TO STREAM %d CODEC %x\n", id, priv->es_map[id - 0x1B0]);
         dvdpcm_header(sh);
+        mp_set_audio_codec_from_tag(sh);
       }
     }
   } else
@@ -619,6 +623,7 @@ static int demux_mpg_read_packet(demuxer_t *demux,int id){
         sh_video_t *sh = (sh_video_t *)ds->sh;
         if(priv->es_map[id - 0x1B0]) {
           sh->format = priv->es_map[id - 0x1B0];
+        mp_set_video_codec_from_tag(sh);
           mp_dbg(MSGT_DEMUX,MSGL_DBG2,"ASSIGNED TO STREAM %d CODEC %x\n", id, priv->es_map[id - 0x1B0]);
         }
       }
@@ -1069,9 +1074,9 @@ static int demux_mpg_control(demuxer_t *demuxer, int cmd, void *arg)
             }
     		return DEMUXER_CTRL_DONTKNOW;
 
-	case DEMUXER_CTRL_GET_PERCENT_POS:
+	case DEMUXER_CTRL_GET_START_TIME:
             if (mpg_d && mpg_d->has_valid_timestamps && mpg_d->first_to_final_pts_len > 0.0) {
-              *((int *)arg)=(int)(100 * (mpg_d->last_pts-mpg_d->first_pts) / mpg_d->first_to_final_pts_len);
+              *((float *)arg)=mpg_d->first_pts;
               return DEMUXER_CTRL_OK;
             }
 	    return DEMUXER_CTRL_DONTKNOW;
@@ -1129,6 +1134,8 @@ static demuxer_t* demux_mpg_es_open(demuxer_t* demuxer)
     demuxer->video->sh = new_sh_video(demuxer,0); // create dummy video stream header, id=0
     sh_video=demuxer->video->sh;sh_video->ds=demuxer->video;
 
+    demuxer->ts_resets_possible = true;
+
     return demuxer;
 }
 
@@ -1137,6 +1144,9 @@ static demuxer_t *demux_mpg_gxf_open(demuxer_t *demuxer) {
   demuxer->video->sh = new_sh_video(demuxer,0);
   ((sh_video_t *)demuxer->video->sh)->ds = demuxer->video;
   demuxer->priv = (void *) 0xffffffff;
+
+  demuxer->ts_resets_possible = true;
+
   return demuxer;
 }
 
@@ -1146,6 +1156,8 @@ static demuxer_t* demux_mpg_ps_open(demuxer_t* demuxer)
     sh_video_t *sh_video=NULL;
 
     sh_video=demuxer->video->sh;sh_video->ds=demuxer->video;
+
+    demuxer->ts_resets_possible = true;
 
     if(demuxer->audio->id!=-2) {
         if(!ds_fill_buffer(demuxer->audio)){
@@ -1186,6 +1198,7 @@ static demuxer_t* demux_mpg_ps_open(demuxer_t* demuxer)
             num_elementary_packets1B6==0)
                 sh_video->format = 0x10000005;
         else sh_video->format = 0x10000002;
+        mp_set_video_codec_from_tag(sh_video);
     }
 
     return demuxer;

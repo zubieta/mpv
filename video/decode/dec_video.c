@@ -22,7 +22,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include <unistd.h>
+#include <assert.h>
+
+#include "demux/codec_tags.h"
 
 #include "core/mp_msg.h"
 
@@ -32,7 +34,7 @@
 #include "stream/stream.h"
 #include "demux/demux.h"
 
-#include "core/codec-cfg.h"
+#include "core/codecs.h"
 
 #include "video/out/vo.h"
 #include "video/csputils.h"
@@ -43,13 +45,6 @@
 
 #include "video/decode/dec_video.h"
 
-// ===================================================================
-
-#include "core/cpudetect.h"
-
-int field_dominance = -1;
-
-int divx_quality = 0;
 
 int get_video_quality_max(sh_video_t *sh_video)
 {
@@ -160,9 +155,9 @@ void resync_video_stream(sh_video_t *sh_video)
     sh_video->prev_sorted_pts = MP_NOPTS_VALUE;
 }
 
-void video_reset_aspect(struct sh_video *sh_video)
+void video_reinit_vo(struct sh_video *sh_video)
 {
-    sh_video->vd_driver->control(sh_video, VDCTRL_RESET_ASPECT, NULL);
+    sh_video->vd_driver->control(sh_video, VDCTRL_REINIT_VO, NULL);
 }
 
 int get_current_video_decoder_lag(sh_video_t *sh_video)
@@ -170,187 +165,110 @@ int get_current_video_decoder_lag(sh_video_t *sh_video)
     const struct vd_functions *vd = sh_video->vd_driver;
     if (!vd)
         return -1;
-    int ret = vd->control(sh_video, VDCTRL_QUERY_UNSEEN_FRAMES, NULL);
-    if (ret >= 10)
-        return ret - 10;
-    return -1;
+    int ret = -1;
+    vd->control(sh_video, VDCTRL_QUERY_UNSEEN_FRAMES, &ret);
+    return ret;
 }
 
 void uninit_video(sh_video_t *sh_video)
 {
     if (!sh_video->initialized)
         return;
-    mp_tmsg(MSGT_DECVIDEO, MSGL_V, "Uninit video: %s\n", sh_video->codec->drv);
+    mp_tmsg(MSGT_DECVIDEO, MSGL_V, "Uninit video.\n");
     sh_video->vd_driver->uninit(sh_video);
     vf_uninit_filter_chain(sh_video->vfilter);
+    sh_video->vfilter = NULL;
+    talloc_free(sh_video->gsh->decoder_desc);
+    sh_video->gsh->decoder_desc = NULL;
     sh_video->initialized = 0;
 }
 
-void vfm_help(void)
+static int init_video_codec(sh_video_t *sh_video, const char *decoder)
 {
-    int i;
-    mp_tmsg(MSGT_DECVIDEO, MSGL_INFO, "Available (compiled-in) video codec families/drivers:\n");
-    mp_msg(MSGT_IDENTIFY, MSGL_INFO, "ID_VIDEO_DRIVERS\n");
-    mp_msg(MSGT_DECVIDEO, MSGL_INFO, "   vfm:    info:  (comment)\n");
-    for (i = 0; mpcodecs_vd_drivers[i] != NULL; i++)
-        mp_msg(MSGT_DECVIDEO, MSGL_INFO, "%8s  %s (%s)\n",
-               mpcodecs_vd_drivers[i]->info->short_name,
-               mpcodecs_vd_drivers[i]->info->name,
-               mpcodecs_vd_drivers[i]->info->comment);
-}
+    assert(!sh_video->initialized);
 
-static int init_video(sh_video_t *sh_video, char *codecname, char *vfm,
-                      int status, stringset_t *selected)
-{
-    int force = 0;
-    unsigned int orig_fourcc =
-        sh_video->bih ? sh_video->bih->biCompression : 0;
-    sh_video->codec = NULL;
-    sh_video->vf_initialized = 0;
-    if (codecname && codecname[0] == '+') {
-        codecname = &codecname[1];
-        force = 1;
+    if (!sh_video->vd_driver->init(sh_video, decoder)) {
+        mp_tmsg(MSGT_DECVIDEO, MSGL_V, "Video decoder init failed.\n");
+        //uninit_video(sh_video);
+        return 0;
     }
 
-    while (1) {
-        int i;
-        int orig_w, orig_h;
-        // restore original fourcc:
-        if (sh_video->bih)
-            sh_video->bih->biCompression = orig_fourcc;
-        if (!
-            (sh_video->codec =
-             find_video_codec(sh_video->format,
-                              sh_video->bih ? ((unsigned int *) &sh_video->
-                                               bih->biCompression) : NULL,
-                              sh_video->codec, force)))
-            break;
-        // ok we found one codec
-        if (stringset_test(selected, sh_video->codec->name))
-            continue;           // already tried & failed
-        if (codecname && strcmp(sh_video->codec->name, codecname))
-            continue;           // -vc
-        if (vfm && strcmp(sh_video->codec->drv, vfm))
-            continue;           // vfm doesn't match
-        if (!force && sh_video->codec->status < status)
-            continue;           // too unstable
-        stringset_add(selected, sh_video->codec->name); // tagging it
-        // ok, it matches all rules, let's find the driver!
-        for (i = 0; mpcodecs_vd_drivers[i] != NULL; i++)
-            if (!strcmp(mpcodecs_vd_drivers[i]->info->short_name,
-                        sh_video->codec->drv))
-                break;
-        sh_video->vd_driver = mpcodecs_vd_drivers[i];
-        if (!sh_video->vd_driver) {    // driver not available (==compiled in)
-            mp_tmsg(MSGT_DECVIDEO, MSGL_WARN,
-                   _("Requested video codec family [%s] (vfm=%s) not available.\nEnable it at compilation.\n"),
-                   sh_video->codec->name, sh_video->codec->drv);
+    sh_video->initialized = 1;
+    sh_video->prev_codec_reordered_pts = MP_NOPTS_VALUE;
+    sh_video->prev_sorted_pts = MP_NOPTS_VALUE;
+    return 1;
+}
+
+struct mp_decoder_list *mp_video_decoder_list(void)
+{
+    struct mp_decoder_list *list = talloc_zero(NULL, struct mp_decoder_list);
+    for (int i = 0; mpcodecs_vd_drivers[i] != NULL; i++)
+        mpcodecs_vd_drivers[i]->add_decoders(list);
+    return list;
+}
+
+static struct mp_decoder_list *mp_select_video_decoders(const char *codec,
+                                                        char *selection)
+{
+    struct mp_decoder_list *list = mp_video_decoder_list();
+    struct mp_decoder_list *new = mp_select_decoders(list, codec, selection);
+    talloc_free(list);
+    return new;
+}
+
+static const struct vd_functions *find_driver(const char *name)
+{
+    for (int i = 0; mpcodecs_vd_drivers[i] != NULL; i++) {
+        if (strcmp(mpcodecs_vd_drivers[i]->name, name) == 0)
+            return mpcodecs_vd_drivers[i];
+    }
+    return NULL;
+}
+
+int init_best_video_codec(sh_video_t *sh_video, char* video_decoders)
+{
+    assert(!sh_video->initialized);
+
+    struct mp_decoder_entry *decoder = NULL;
+    struct mp_decoder_list *list =
+        mp_select_video_decoders(sh_video->gsh->codec, video_decoders);
+
+    mp_print_decoders(MSGT_DECVIDEO, MSGL_V, "Codec list:", list);
+
+    for (int n = 0; n < list->num_entries; n++) {
+        struct mp_decoder_entry *sel = &list->entries[n];
+        const struct vd_functions *driver = find_driver(sel->family);
+        if (!driver)
             continue;
+        mp_tmsg(MSGT_DECVIDEO, MSGL_V, "Opening video decoder %s:%s\n",
+                sel->family, sel->decoder);
+        sh_video->vd_driver = driver;
+        if (init_video_codec(sh_video, sel->decoder)) {
+            decoder = sel;
+            break;
         }
-        orig_w = sh_video->bih ? sh_video->bih->biWidth : sh_video->disp_w;
-        orig_h = sh_video->bih ? sh_video->bih->biHeight : sh_video->disp_h;
-        sh_video->disp_w = orig_w;
-        sh_video->disp_h = orig_h;
-        if (sh_video->bih) {
-            sh_video->bih->biWidth = sh_video->disp_w;
-            sh_video->bih->biHeight = sh_video->disp_h;
-        }
-
-        // init()
-        const struct vd_functions *vd = sh_video->vd_driver;
-        mp_tmsg(MSGT_DECVIDEO, MSGL_V, "Opening video decoder: [%s] %s\n",
-               vd->info->short_name, vd->info->name);
-        // clear vf init error, it is no longer relevant
-        if (sh_video->vf_initialized < 0)
-            sh_video->vf_initialized = 0;
-        if (!vd->init(sh_video)) {
-            mp_tmsg(MSGT_DECVIDEO, MSGL_INFO, "Video decoder init failed for "
-                    "codecs.conf entry \"%s\".\n", sh_video->codec->name);
-            sh_video->disp_w = orig_w;
-            sh_video->disp_h = orig_h;
-            if (sh_video->bih) {
-                sh_video->bih->biWidth = sh_video->disp_w;
-                sh_video->bih->biHeight = sh_video->disp_h;
-            }
-            continue;           // try next...
-        }
-        // Yeah! We got it!
-        sh_video->initialized = 1;
-        sh_video->prev_codec_reordered_pts = MP_NOPTS_VALUE;
-        sh_video->prev_sorted_pts = MP_NOPTS_VALUE;
-        return 1;
-    }
-    return 0;
-}
-
-int init_best_video_codec(sh_video_t *sh_video, char **video_codec_list,
-                          char **video_fm_list)
-{
-    char *vc_l_default[2] = { "", (char *) NULL };
-    stringset_t selected;
-    // hack:
-    if (!video_codec_list)
-        video_codec_list = vc_l_default;
-    // Go through the codec.conf and find the best codec...
-    sh_video->initialized = 0;
-    stringset_init(&selected);
-    while (!sh_video->initialized && *video_codec_list) {
-        char *video_codec = *(video_codec_list++);
-        if (video_codec[0]) {
-            if (video_codec[0] == '-') {
-                // disable this codec:
-                stringset_add(&selected, video_codec + 1);
-            } else {
-                // forced codec by name:
-                mp_tmsg(MSGT_DECVIDEO, MSGL_INFO, "Forced video codec: %s\n",
-                       video_codec);
-                init_video(sh_video, video_codec, NULL, -1, &selected);
-            }
-        } else {
-            int status;
-            // try in stability order: UNTESTED, WORKING, BUGGY. never try CRASHING.
-            if (video_fm_list) {
-                char **fmlist = video_fm_list;
-                // try first the preferred codec families:
-                while (!sh_video->initialized && *fmlist) {
-                    char *video_fm = *(fmlist++);
-                    mp_tmsg(MSGT_DECVIDEO, MSGL_INFO, "Trying to force video codec driver family %s...\n",
-                           video_fm);
-                    for (status = CODECS_STATUS__MAX;
-                         status >= CODECS_STATUS__MIN; --status)
-                        if (init_video
-                            (sh_video, NULL, video_fm, status, &selected))
-                            break;
-                }
-            }
-            if (!sh_video->initialized)
-                for (status = CODECS_STATUS__MAX; status >= CODECS_STATUS__MIN;
-                     --status)
-                    if (init_video(sh_video, NULL, NULL, status, &selected))
-                        break;
-        }
-    }
-    stringset_free(&selected);
-
-    if (!sh_video->initialized) {
-        mp_tmsg(MSGT_DECVIDEO, MSGL_ERR, "Cannot find codec matching selected -vo and video format 0x%X.\n",
-               sh_video->format);
-        return 0;               // failed
+        sh_video->vd_driver = NULL;
+        mp_tmsg(MSGT_DECVIDEO, MSGL_WARN, "Video decoder init failed for "
+                "%s:%s\n", sel->family, sel->decoder);
     }
 
-    mp_tmsg(MSGT_DECVIDEO, MSGL_INFO, "Selected video codec: %s [%s]\n",
-            sh_video->codecname ? sh_video->codecname : sh_video->codec->info,
-            sh_video->vd_driver->info->print_name ?
-            sh_video->vd_driver->info->print_name :
-            sh_video->vd_driver->info->short_name);
-    mp_tmsg(MSGT_DECVIDEO, MSGL_V,
-            "Video codecs.conf entry: %s (%s)  vfm: %s\n",
-            sh_video->codec->name, sh_video->codec->info, sh_video->codec->drv);
-    return 1;                   // success
+    if (sh_video->initialized) {
+        sh_video->gsh->decoder_desc =
+            talloc_asprintf(NULL, "%s [%s:%s]", decoder->desc, decoder->family,
+                            decoder->decoder);
+        mp_msg(MSGT_DECVIDEO, MSGL_INFO, "Selected video codec: %s\n",
+               sh_video->gsh->decoder_desc);
+    } else {
+        mp_msg(MSGT_DECVIDEO, MSGL_ERR,
+               "Failed to initialize a video decoder for codec '%s'.\n",
+               sh_video->gsh->codec ? sh_video->gsh->codec : "<unknown>");
+    }
+
+    talloc_free(list);
+    return sh_video->initialized;
 }
 
 void *decode_video(sh_video_t *sh_video, struct demux_packet *packet,
-                   unsigned char *start, int in_size,
                    int drop_frame, double pts)
 {
     mp_image_t *mpi = NULL;
@@ -386,27 +304,18 @@ void *decode_video(sh_video_t *sh_video, struct demux_packet *packet,
         }
     }
 
-    mpi = sh_video->vd_driver->decode(sh_video, packet, start, in_size,
-                                      drop_frame, &pts);
+    mpi = sh_video->vd_driver->decode(sh_video, packet, drop_frame, &pts);
 
     //------------------------ frame decoded. --------------------
-
-#if HAVE_MMX
-    // some codecs are broken, and doesn't restore MMX state :(
-    // it happens usually with broken/damaged files.
-    if (gCpuCaps.hasMMX) {
-        __asm__ volatile("emms\n\t":::"memory");
-    }
-#endif
 
     if (!mpi || drop_frame) {
         talloc_free(mpi);
         return NULL;            // error / skipped frame
     }
 
-    if (field_dominance == 0)
+    if (opts->field_dominance == 0)
         mpi->fields |= MP_IMGFIELD_TOP_FIRST;
-    else if (field_dominance == 1)
+    else if (opts->field_dominance == 1)
         mpi->fields &= ~MP_IMGFIELD_TOP_FIRST;
 
     double prevpts = sh_video->codec_reordered_pts;

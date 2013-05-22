@@ -95,6 +95,7 @@ struct track {
     // If this track is from an external file (e.g. subtitle file).
     bool is_external;
     char *external_filename;
+    bool auto_loaded;
 
     // If the track's stream changes with the timeline (ordered chapters).
     bool under_timeline;
@@ -116,6 +117,10 @@ struct track {
     struct sub_data *subdata;
 };
 
+enum {
+    MAX_NUM_VO_PTS = 100,
+};
+
 typedef struct MPContext {
     struct MPOpts opts;
     struct m_config *mconfig;
@@ -127,8 +132,9 @@ typedef struct MPContext {
     subtitle subs; // subtitle list used when reading subtitles from demuxer
 
     int add_osd_seek_info; // bitfield of enum mp_osd_seek_info
-    unsigned int osd_visible;
+    unsigned int osd_visible; // for the osd bar only
     int osd_function;
+    unsigned int osd_function_visible;
 
     struct playlist *playlist;
     char *filename; // currently playing file
@@ -198,6 +204,11 @@ typedef struct MPContext {
     // How much video timing has been changed to make it match the audio
     // timeline. Used for status line information only.
     double total_avsync_change;
+    // Total number of dropped frames that were "approved" to be dropped.
+    // Actual dropping depends on --framedrop and decoder internals.
+    int drop_frame_cnt;
+    // Number of frames dropped in a row.
+    int dropped_frames;
     // A-V sync difference when last frame was displayed. Kept to display
     // the same value if the status line is updated at a time where no new
     // video frame is shown.
@@ -209,7 +220,21 @@ typedef struct MPContext {
     // As video_pts, but is not reset when seeking away. (For the very short
     // period of time until a new frame is decoded and shown.)
     double last_vo_pts;
+    // Video PTS, or audio PTS if video has ended.
+    double playback_pts;
 
+    // History of video frames timestamps that were queued in the VO
+    // This includes even skipped frames during hr-seek
+    double vo_pts_history_pts[MAX_NUM_VO_PTS];
+    // Whether the PTS at vo_pts_history[n] is after a seek reset
+    uint64_t vo_pts_history_seek[MAX_NUM_VO_PTS];
+    uint64_t vo_pts_history_seek_ts;
+    uint64_t backstep_start_seek_ts;
+    bool backstep_active;
+
+    float audio_delay;
+
+    unsigned int last_heartbeat;
     // used to prevent hanging in some error cases
     unsigned int start_timestamp;
 
@@ -235,18 +260,17 @@ typedef struct MPContext {
     int last_chapter_seek;
     double last_chapter_pts;
 
-    float begin_skip; ///< start time of the current skip while on edlout mode
-
     struct ass_library *ass_library;
-
-    int file_format;
 
     int last_dvb_step;
     int dvbin_reopen;
 
-    int paused;
+    bool paused;
     // step this many frames, then pause
     int step_frames;
+    // Counted down each frame, stop playback if 0 is reached. (-1 = disable)
+    int max_frames;
+    bool playing_msg_shown;
 
     bool paused_for_cache;
 
@@ -274,15 +298,18 @@ double playing_audio_pts(struct MPContext *mpctx);
 struct track *mp_add_subtitles(struct MPContext *mpctx, char *filename,
                                float fps, int noerr);
 int reinit_video_chain(struct MPContext *mpctx);
+int reinit_video_filters(struct MPContext *mpctx);
 void pause_player(struct MPContext *mpctx);
 void unpause_player(struct MPContext *mpctx);
-void add_step_frame(struct MPContext *mpctx);
+void add_step_frame(struct MPContext *mpctx, int dir);
 void queue_seek(struct MPContext *mpctx, enum seek_type type, double amount,
                 int exact);
-int seek_chapter(struct MPContext *mpctx, int chapter, double *seek_pts);
+bool mp_seek_chapter(struct MPContext *mpctx, int chapter);
 double get_time_length(struct MPContext *mpctx);
+double get_start_time(struct MPContext *mpctx);
 double get_current_time(struct MPContext *mpctx);
 int get_percent_pos(struct MPContext *mpctx);
+double get_current_pos_ratio(struct MPContext *mpctx);
 int get_current_chapter(struct MPContext *mpctx);
 char *chapter_display_name(struct MPContext *mpctx, int chapter);
 char *chapter_name(struct MPContext *mpctx, int chapter);
@@ -293,6 +320,9 @@ void mp_switch_track(struct MPContext *mpctx, enum stream_type type,
 struct track *mp_track_by_tid(struct MPContext *mpctx, enum stream_type type,
                               int tid);
 bool mp_remove_track(struct MPContext *mpctx, struct track *track);
+struct playlist_entry *mp_next_file(struct MPContext *mpctx, int direction);
+int mp_get_cache_percent(struct MPContext *mpctx);
+void mp_write_watch_later_conf(struct MPContext *mpctx);
 
 // timeline/tl_matroska.c
 void build_ordered_chapter_timeline(struct MPContext *mpctx);

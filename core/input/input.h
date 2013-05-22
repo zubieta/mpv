@@ -28,6 +28,7 @@ enum mp_command_type {
     MP_CMD_IGNORE,
     MP_CMD_SEEK,
     MP_CMD_QUIT,
+    MP_CMD_QUIT_WATCH_LATER,
     MP_CMD_PLAYLIST_NEXT,
     MP_CMD_PLAYLIST_PREV,
     MP_CMD_OSD,
@@ -40,11 +41,11 @@ enum mp_command_type {
     MP_CMD_PLAYLIST_CLEAR,
     MP_CMD_SUB_STEP,
     MP_CMD_TV_SET_CHANNEL,
-    MP_CMD_EDL_MARK,
     MP_CMD_TV_LAST_CHANNEL,
     MP_CMD_TV_SET_FREQ,
     MP_CMD_TV_SET_NORM,
     MP_CMD_FRAME_STEP,
+    MP_CMD_FRAME_BACK_STEP,
     MP_CMD_SPEED_MULT,
     MP_CMD_RUN,
     MP_CMD_SUB_ADD,
@@ -77,8 +78,12 @@ enum mp_command_type {
     MP_CMD_AF_CLR,
     MP_CMD_AF_CMDLINE,
 
+    /// Video filter commands
+    MP_CMD_VF,
+
     MP_CMD_SHOW_CHAPTERS,
     MP_CMD_SHOW_TRACKS,
+    MP_CMD_SHOW_PLAYLIST,
 
     /// Video output commands
     MP_CMD_VO_CMDLINE,
@@ -121,6 +126,7 @@ struct mp_cmd_arg {
     union {
         int i;
         float f;
+        double d;
         char *s;
     } v;
 };
@@ -131,6 +137,7 @@ typedef struct mp_cmd {
     struct mp_cmd_arg args[MP_CMD_MAX_ARGS];
     int nargs;
     int pausing;
+    bool raw_args;
     enum mp_on_osd on_osd;
     bstr original;
     struct mp_cmd *queue_next;
@@ -203,7 +210,8 @@ char *mp_input_get_section(struct input_ctx *ictx);
 
 // Initialize the input system
 struct input_conf;
-struct input_ctx *mp_input_init(struct input_conf *input_conf);
+struct input_ctx *mp_input_init(struct input_conf *input_conf,
+                                bool load_default_conf);
 
 void mp_input_uninit(struct input_ctx *ictx);
 

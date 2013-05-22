@@ -1,6 +1,8 @@
 /*
  * This file is part of MPlayer.
  *
+ * Copyright (C) 2012 Naoya OYAMA
+ *
  * MPlayer is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -24,15 +26,9 @@
 
 #include "config.h"
 #include "core/mp_msg.h"
+#include "core/av_common.h"
+#include "core/options.h"
 #include "ad_internal.h"
-
-static const ad_info_t info = {
-    "libavformat/spdifenc audio pass-through decoder.",
-    "spdif",
-    "Naoya OYAMA",
-    "Naoya OYAMA",
-    "For ALL hardware decoders"
-};
 
 LIBAD_EXTERN(spdif)
 
@@ -76,22 +72,21 @@ static int preinit(sh_audio_t *sh)
     return 1;
 }
 
-static int init(sh_audio_t *sh)
+static int codecs[] = {
+    AV_CODEC_ID_AAC,
+    AV_CODEC_ID_AC3,
+    AV_CODEC_ID_DTS,
+    AV_CODEC_ID_EAC3,
+    AV_CODEC_ID_MP3,
+    AV_CODEC_ID_TRUEHD,
+    AV_CODEC_ID_NONE
+};
+
+static int init(sh_audio_t *sh, const char *decoder)
 {
-    int i, x, in_size, srate, bps, *dtshd_rate;
+    int x, in_size, srate, bps, *dtshd_rate;
     unsigned char *start;
     double pts;
-    static const struct {
-        const char *name; enum CodecID id;
-    } fmt_id_type[] = {
-        { "aac" , CODEC_ID_AAC    },
-        { "ac3" , CODEC_ID_AC3    },
-        { "dca" , CODEC_ID_DTS    },
-        { "eac3", CODEC_ID_EAC3   },
-        { "mpa" , CODEC_ID_MP3    },
-        { "thd" , CODEC_ID_TRUEHD },
-        { NULL  , 0 }
-    };
     AVFormatContext     *lavf_ctx  = NULL;
     AVStream            *stream    = NULL;
     const AVOption      *opt       = NULL;
@@ -122,12 +117,7 @@ static int init(sh_audio_t *sh)
         goto fail;
     lavf_ctx->duration   = AV_NOPTS_VALUE;
     lavf_ctx->start_time = AV_NOPTS_VALUE;
-    for (i = 0; fmt_id_type[i].name; i++) {
-        if (!strcmp(sh->codec->dll, fmt_id_type[i].name)) {
-            lavf_ctx->streams[0]->codec->codec_id = fmt_id_type[i].id;
-            break;
-        }
-    }
+    lavf_ctx->streams[0]->codec->codec_id = mp_codec_to_av_codec_id(decoder);
     lavf_ctx->raw_packet_buffer_remaining_size = RAW_PACKET_BUFFER_SIZE;
     if (AVERROR_PATCHWELCOME == lavf_ctx->oformat->write_header(lavf_ctx)) {
         mp_msg(MSGT_DECAUDIO,MSGL_INFO,
@@ -158,59 +148,70 @@ static int init(sh_audio_t *sh)
     }
     sh->ds->buffer_pos -= in_size;
 
+    int num_channels = 0;
     switch (lavf_ctx->streams[0]->codec->codec_id) {
-    case CODEC_ID_AAC:
+    case AV_CODEC_ID_AAC:
         spdif_ctx->iec61937_packet_size = 16384;
         sh->sample_format               = AF_FORMAT_IEC61937_LE;
         sh->samplerate                  = srate;
-        sh->channels                    = 2;
+        num_channels                    = 2;
         sh->i_bps                       = bps;
         break;
-    case CODEC_ID_AC3:
+    case AV_CODEC_ID_AC3:
         spdif_ctx->iec61937_packet_size = 6144;
         sh->sample_format               = AF_FORMAT_AC3_LE;
         sh->samplerate                  = srate;
-        sh->channels                    = 2;
+        num_channels                    = 2;
         sh->i_bps                       = bps;
         break;
-    case CODEC_ID_DTS: // FORCE USE DTS-HD
-        opt = av_opt_find(&lavf_ctx->oformat->priv_class,
-                          "dtshd_rate", NULL, 0, 0);
-        if (!opt)
-            goto fail;
-        dtshd_rate                      = (int*)(((uint8_t*)lavf_ctx->priv_data) +
-                                          opt->offset);
-        *dtshd_rate                     = 192000*4;
-        spdif_ctx->iec61937_packet_size = 32768;
-        sh->sample_format               = AF_FORMAT_IEC61937_LE;
-        sh->samplerate                  = 192000; // DTS core require 48000
-        sh->channels                    = 2*4;
-        sh->i_bps                       = bps;
+    case AV_CODEC_ID_DTS:
+        if(sh->opts->dtshd) {
+            opt = av_opt_find(&lavf_ctx->oformat->priv_class,
+                              "dtshd_rate", NULL, 0, 0);
+            if (!opt)
+                goto fail;
+            dtshd_rate                      = (int*)(((uint8_t*)lavf_ctx->priv_data) +
+                                              opt->offset);
+            *dtshd_rate                     = 192000*4;
+            spdif_ctx->iec61937_packet_size = 32768;
+            sh->sample_format               = AF_FORMAT_IEC61937_LE;
+            sh->samplerate                  = 192000; // DTS core require 48000
+            num_channels                    = 2*4;
+            sh->i_bps                       = bps;
+        } else {
+            spdif_ctx->iec61937_packet_size = 32768;
+            sh->sample_format               = AF_FORMAT_AC3_LE;
+            sh->samplerate                  = srate;
+            num_channels                    = 2;
+            sh->i_bps                       = bps;
+        }
         break;
-    case CODEC_ID_EAC3:
+    case AV_CODEC_ID_EAC3:
         spdif_ctx->iec61937_packet_size = 24576;
         sh->sample_format               = AF_FORMAT_IEC61937_LE;
         sh->samplerate                  = 192000;
-        sh->channels                    = 2;
+        num_channels                    = 2;
         sh->i_bps                       = bps;
         break;
-    case CODEC_ID_MP3:
+    case AV_CODEC_ID_MP3:
         spdif_ctx->iec61937_packet_size = 4608;
         sh->sample_format               = AF_FORMAT_MPEG2;
         sh->samplerate                  = srate;
-        sh->channels                    = 2;
+        num_channels                    = 2;
         sh->i_bps                       = bps;
         break;
-    case CODEC_ID_TRUEHD:
+    case AV_CODEC_ID_TRUEHD:
         spdif_ctx->iec61937_packet_size = 61440;
         sh->sample_format               = AF_FORMAT_IEC61937_LE;
         sh->samplerate                  = 192000;
-        sh->channels                    = 8;
+        num_channels                    = 8;
         sh->i_bps                       = bps;
         break;
     default:
         break;
     }
+    if (num_channels)
+        mp_chmap_from_channels(&sh->channels, num_channels);
 
     return 1;
 
@@ -272,7 +273,7 @@ static int decode_audio(sh_audio_t *sh, unsigned char *buf,
     return spdif_ctx->out_buffer_len;
 }
 
-static int control(sh_audio_t *sh, int cmd, void* arg, ...)
+static int control(sh_audio_t *sh, int cmd, void *arg)
 {
     unsigned char *start;
     double pts;
@@ -305,4 +306,15 @@ static void uninit(sh_audio_t *sh)
     }
     av_freep(&lavf_ctx);
     av_freep(&spdif_ctx);
+}
+
+static void add_decoders(struct mp_decoder_list *list)
+{
+    for (int n = 0; codecs[n] != AV_CODEC_ID_NONE; n++) {
+        const char *format = mp_codec_from_av_codec_id(codecs[n]);
+        if (format) {
+            mp_add_decoder(list, "spdif", format, format,
+                           "libavformat/spdifenc audio pass-through decoder");
+        }
+    }
 }

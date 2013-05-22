@@ -1,4 +1,35 @@
---a52drc=<level>
+--abs=<value>
+    (``--ao=oss`` only) (OBSOLETE)
+    Override audio driver/card buffer size detection.
+
+--ad=<[+|-]family1:(*|decoder1),[+|-]family2:(*|decoder2),...[-]>
+    Specify a priority list of audio decoders to be used, according to their
+    family and decoder name. Entries like ``family:*`` prioritize all decoders
+    of the given family. When determining which decoder to use, the first
+    decoder that matches the audio format is selected. If that is unavailable,
+    the next decoder is used. Finally, it tries all other decoders that are not
+    explicitly selected or rejected by the option.
+
+    ``-`` at the end of the list suppresses fallback to other available
+    decoders not on the ``--ad`` list. ``+`` in front of an entry forces the
+    decoder. Both of these shouldn't normally be used, because they break
+    normal decoder auto-selection!
+
+    ``-`` in front of an entry disables selection of the decoder.
+
+    *EXAMPLE*:
+
+    ``--ad=lavc:mp3float``
+        Prefer the FFmpeg/Libav ``mp3float`` decoder over all other mp3
+        decoders.
+
+    ``--ad=spdif:ac3,lavc:*``
+        Always prefer spdif AC3 over FFmpeg/Libav over anything else.
+
+    ``--ad=help``
+        List all available decoders.
+
+--ad-lavc-ac3drc=<level>
     Select the Dynamic Range Compression level for AC-3 audio streams. <level>
     is a float value ranging from 0 to 1, where 0 means no compression and 1
     (which is the default) means full compression (make loud passages more
@@ -6,18 +37,16 @@
     experimental. This option only shows an effect if the AC-3 stream contains
     the required range compression information.
 
---abs=<value>
-    (``--ao=oss`` only) (OBSOLETE)
-    Override audio driver/card buffer size detection.
+--ad-lavc-downmix=<yes|no>
+    Whether to request audio channel downmixing from the decoder (default: yes).
+    Some decoders, like AC-3, AAC and DTS, can remix audio on decoding. The
+    requested number of output channels is set with the ``--channels`` option.
+    Useful for playing surround audio on a stereo system.
 
---ac=<[-\|+]codec1,[-\|+]codec2,...[,]>
-    Specify a priority list of audio codecs to be used, according to their
-    codec name in codecs.conf. Use a '-' before the codec name to omit it.
-    Use a '+' before the codec name to force it, this will likely crash! If
-    the list has a trailing ',' mpv will fall back on codecs not contained
-    in the list.
-
-    *NOTE*: See ``--ac=help`` for a full list of available codecs.
+--ad-lavc-o=<key>=<value>[,<key>=<value>[,...]]
+    Pass AVOptions to libavcodec decoder. Note, a patch to make the o=
+    unneeded and pass all unknown options through the AVOption system is
+    welcome. A full list of AVOptions can be found in the FFmpeg manual.
 
 --af=<filter1[=parameter1:parameter2:...],filter2,...>
     Specify a list of audio filters to apply to the audio stream. See
@@ -25,51 +54,6 @@
     The option variants ``--af-add``, ``--af-pre``, ``--af-del`` and
     ``--af-clr`` exist to modify a previously specified list, but you
     shouldn't need these for typical use.
-
---af-adv=<force=(0-7):list=(filters)>
-    See also ``--af``.
-    Specify advanced audio filter options:
-
-    force=<0-7>
-        Forces the insertion of audio filters to one of the following:
-
-        0
-            Use completely automatic filter insertion (currently identical to
-            1).
-        1
-            Optimize for accuracy (default).
-        2
-            Optimize for speed. *Warning*: Some features in the audio filters
-            may silently fail, and the sound quality may drop.
-        3
-            Use no automatic insertion of filters and no optimization.
-            *Warning*: It may be possible to crash mpv using this setting.
-        4
-            Use automatic insertion of filters according to 0 above, but use
-            floating point processing when possible.
-        5
-            Use automatic insertion of filters according to 1 above, but use
-            floating point processing when possible.
-        6
-            Use automatic insertion of filters according to 2 above, but use
-            floating point processing when possible.
-        7
-            Use no automatic insertion of filters according to 3 above, and
-            use floating point processing when possible.
-
-    list=<filters>
-        Same as ``--af``.
-
---afm=<driver1,driver2,...>
-    Specify a priority list of audio codec families to be used, according to
-    their codec name in codecs.conf. Falls back on the default codecs if none
-    of the given codec families work.
-
-    *NOTE*: See ``--afm=help`` for a full list of available codec families.
-
-    *EXAMPLE*:
-
-    :``--afm=ffmpeg``:    Try FFmpeg's libavcodec codecs first.
 
 --aid=<ID|auto|no>
     Select audio channel. ``auto`` selects the default, ``no`` disables audio.
@@ -95,9 +79,6 @@
     interactive use you'd normally specify a single one to use, but in
     configuration files specifying a list of fallbacks may make sense. See
     `audio_outputs` for details and descriptions of available drivers.
-
---ar, --no-ar
-      Enable/disable AppleIR remote support. Enabled by default.
 
 --aspect=<ratio>
     Override movie aspect ratio, in case aspect information is incorrect or
@@ -219,7 +200,7 @@
     are applied after this option.
 
     See ``--geometry`` for details how this is handled with multi-monitor
-    setups, or if the ``--wid`` option is used.
+    setups.
 
     Use ``--autofit-larger`` instead if you don't want the window to get larger.
     Use ``--geometry`` if you want to force both window width and height to a
@@ -292,11 +273,6 @@
     Some Blu-ray discs contain scenes that can be viewed from multiple angles.
     Here you can tell mpv which angles to use (default: 1).
 
---bluray-chapter=<ID>
-    (Blu-ray only)
-    Tells mpv which Blu-ray chapter to start the current title from
-    (default: 1).
-
 --bluray-device=<path>
     (Blu-ray only)
     Specify the Blu-ray disc location. Must be a directory with Blu-ray
@@ -316,6 +292,12 @@
     default cache size) for network streams. May be useful when playing files
     from slow media, but can also have negative effects, especially with file
     formats that require a lot of seeking, such as mp4. See also ``--no-cache``.
+
+    Note that half the cache size will be used to allow fast seeking back. This
+    is also the reason why a full cache is usually reported as 50% full. The
+    cache fill display does not include the part of the cache reserved for
+    seeking back. Likewise, when starting a file the cache will be at 100%,
+    because no space is reserved for seeking back yet.
 
 --cache-pause=<no|percentage>
     If the cache percentage goes below the specified value, pause and wait
@@ -376,25 +358,24 @@
 --cdrom-device=<path>
     Specify the CD-ROM device (default: ``/dev/cdrom``).
 
---channels=<number>
+--channels=<number|layout>
     Request the number of playback channels (default: 2). mpv asks the
     decoder to decode the audio into as many channels as specified. Then it is
     up to the decoder to fulfill the requirement. This is usually only
-    important when playing videos with AC-3 audio (like DVDs). In that case
-    liba52 does the decoding by default and correctly downmixes the audio into
-    the requested number of channels. To directly control the number of output
-    channels independently of how many channels are decoded, use the channels
-    filter (``--af=channels``).
+    important when playing videos with AC-3, AAC or DTS audio. In that case
+    libavcodec downmixes the audio into the requested number of channels if
+    possible.
 
     *NOTE*: This option is honored by codecs (AC-3 only), filters (surround)
     and audio output drivers (OSS at least).
 
-    Available options are:
+    The ``--channels`` option either takes a channel number or an explicit
+    channel layout. Channel numbers refer to default layouts, e.g. 2 channels
+    refer to stereo, 6 refers to 5.1.
 
-    :2: stereo
-    :4: surround
-    :6: full 5.1
-    :8: full 7.1
+    See ``--channels=help`` output for defined default layouts. This also
+    lists speaker names, which can be used to express arbitrary channel
+    layouts (e.g. ``fl-fr-lfe`` is 2.1).
 
 --chapter=<start[-end]>
     Specify which chapter to start playing at. Optionally specify which
@@ -408,10 +389,6 @@
     If the end of one playback part is less than the given threshold away from
     the start of the next one then keep playing video normally over the
     chapter change instead of doing a seek.
-
---codecs-file=<filename>
-    Override the standard search path and use the specified file instead of
-    the builtin codecs.conf.
 
 --colormatrix=<colorspace>
     Controls the YUV to RGB color space conversion when playing video. There
@@ -528,6 +505,13 @@
     Time in milliseconds to recognize two consecutive button presses as a
     double-click (default: 300).
 
+--dtshd, --no-dtshd
+    When using DTS passthrough, output any DTS-HD track as-is.
+    With ``--no-dtshd`` (the default) only the DTS Core parts will be output.
+
+    DTS-HD tracks can be sent over HDMI but not over the original
+    coax/toslink S/PDIF system.
+
 --dvbin=<options>
     Pass the following parameters to the DVB input module, in order to
     override the default ones:
@@ -565,15 +549,6 @@
     Specify the edition (set of chapters) to use, where 0 is the first. If set
     to -1 (the default), mpv will choose the first edition declared as a
     default, or if there is no default, the first edition defined.
-
---edlout=<filename>
-    Creates a new file and writes edit decision list (EDL) records to it.
-    During playback, the user hits 'i' to mark the start or end of a skip
-    block. This provides a starting point from which the user can fine-tune
-    EDL entries later. See http://www.mplayerhq.hu/DOCS/HTML/en/edl.html for
-    details.
-
-    *NOTE*: broken.
 
 --embeddedfonts, --no-embeddedfonts
     Use fonts embedded in Matroska container files and ASS scripts (default:
@@ -650,10 +625,28 @@
     *NOTE*: Practical use of this feature is questionable. Disabled by default.
 
 --frames=<number>
-    Play/convert only first <number> frames, then quit.
+    Play/convert only first <number> video frames, then quit. For audio only,
+    run <number> iteration of the playback loop, which is most likely not what
+    you want. (This behavior also applies to the corner case when there are
+    less video frames than <number>, and audio is longer than the video.)
 
 --fullscreen, --fs
     Fullscreen playback (centers movie, and paints black bands around it).
+
+
+--fs-screen=<all|current|0-32>
+    In multi-monitor configurations (i.e. a single desktop that spans across
+    multiple displays) this option tells mpv which screen to go fullscreen to.
+    If ``default`` is provided mpv will fallback to using the behaviour
+    depending on what the user provided with the ``screen`` option.
+
+    *NOTE (X11)*: this option does not work properly with all window managers.
+    ``all`` in particular will usually only work with ``--fstype=-fullscreen``
+    or ``--fstype=none``, and even then only with some window managers.
+
+    *NOTE (OSX)*: ``all`` doesn't work on OSX and will behave like ``current``.
+
+    See also ``--screen``.
 
 --fsmode-dontuse=<0-31>
     OBSOLETE, use the ``--fs`` option.
@@ -695,6 +688,13 @@
     ``--fstype=fullscreen``
          Fixes fullscreen switching on OpenBox 1.x.
 
+--native-fs
+    (OS X only)
+    Use OSX's Mission Control's fullscreen feature instead of the custom one
+    provided by mpv. This can potentially break a lot of stuff like
+    ``--geometry`` and is disabled by default. On the other hand it provides
+    a more 'OS X-like' user experience.
+
 --gamma=<-100-100>
     Adjust the gamma of the video signal (default: 0). Not supported by all
     video output drivers.
@@ -728,17 +728,19 @@
     lower border" and "--20+-10" means "place 20 pixels beyond the right and
     10 pixels beyond the top border".
 
-    If an external window is specified using the ``--wid`` option,
-    then the x and y coordinates are relative to the top-left corner of the
-    window rather than the screen. The coordinates are relative to the screen
-    given with ``--screen`` for the video output drivers that fully
-    support ``--screen``.
+    If an external window is specified using the ``--wid`` option, this
+    option is ignored.
+
+    The coordinates are relative to the screen given with ``--screen`` for the
+    video output drivers that fully support ``--screen``.
 
     *NOTE*: Generally only supported by GUI VOs. Ignored for encoding.
 
     *NOTE (OSX)*: On Mac OSX the origin of the screen coordinate system is
     located on the the bottom-left corner. For instance, ``0:0`` will place the
     window at the bottom-left of the screen.
+
+    *NOTE (X11)*: this option does not work properly with all window managers.
 
     *EXAMPLE*:
 
@@ -768,7 +770,8 @@
 
 --heartbeat-cmd
     Command that is executed every 30 seconds during playback via *system()* -
-    i.e. using the shell.
+    i.e. using the shell. The time between the commands can be customized with
+    the ``--heartbeat-interval`` option.
 
     *NOTE*: mpv uses this command without any checking. It is your
     responsibility to ensure it does not cause security problems (e.g. make
@@ -786,6 +789,9 @@
 
     *EXAMPLE for GNOME screensaver*: ``mpv
     --heartbeat-cmd="gnome-screensaver-command -p" file``
+
+--heartbeat-interval=<sec>
+    Time between ``--heartbeat-cmd`` invocations in seconds (default: 30).
 
 --help
     Show short summary of options.
@@ -851,13 +857,25 @@
     :vda:       OSX
     :crystalhd: Broadcom Crystal HD
 
+--hwdec-codecs=<codec1,codec2,...|all>
+    Allow hardware decoding for a given list of codecs only. The default is the
+    special value ``all``, which always allows all codecs.
+
+    This is usually only needed with broken GPUs, where fallback to software
+    decoding doesn't work properly.
+
+    *EXAMPLE*:
+
+    - ``mpv --hwdec=vdpau --vo=vdpau --hwdec-codecs=h264,mpeg2video``
+       Enable vdpau decoding for h264 and mpeg2 only.
+
 --identify
     Deprecated. Use ``TOOLS/mpv_identify.sh``.
 
 --idle
     Makes mpv wait idly instead of quitting when there is no file to play.
     Mostly useful in slave mode where mpv can be controlled through input
-    commands (see also ``--slave``).
+    commands (see also ``--slave-broken``).
 
 --idx
     Rebuilds index of files if no index was found, allowing seeking. Useful
@@ -885,56 +903,43 @@
     their start timestamps differ, and then video timing is gradually adjusted
     if necessary to reach correct synchronization later.
 
---input=<commands>
-    This option can be used to configure certain parts of the input system.
-    Paths are relative to ``~/.mpv/``.
+--input-conf=<filename>
+    Specify input configuration file other than the default
+    ``~/.mpv/input.conf``.
 
-    *NOTE*: Autorepeat is currently only supported by joysticks.
+--input-ar-delay
+    Delay in milliseconds before we start to autorepeat a key (0 to
+    disable).
 
-    Available commands are:
+--input-ar-rate
+    Number of key presses to generate per second on autorepeat.
 
-    conf=<filename>
-        Specify input configuration file other than the default
-        ``~/.mpv/input.conf``. ``~/.mpv/<filename>`` is assumed if no
-        full path is given.
+--no-input-default-bindings
+    Disable mpv default (builtin) key bindings.
 
-    ar-dev=<device>
-        Device to be used for Apple IR Remote (default is autodetected, Linux
-        only).
+--input-keylist
+    Prints all keys that can be bound to commands.
 
-    ar-delay
-        Delay in milliseconds before we start to autorepeat a key (0 to
-        disable).
+--input-cmdlist
+    Prints all commands that can be bound to keys.
 
-    ar-rate
-        Number of key presses to generate per second on autorepeat.
+--input-js-dev
+    Specifies the joystick device to use (default: ``/dev/input/js0``).
 
-    (no-)default-bindings
-        Use the key bindings that mpv ships with by default.
+--input-file=<filename>
+    Read commands from the given file. Mostly useful with a FIFO.
+    See also ``--slave-broken``.
 
-    keylist
-        Prints all keys that can be bound to commands.
+    *NOTE*: When the given file is a FIFO mpv opens both ends so you
+    can do several `echo "seek 10" > mp_pipe` and the pipe will stay
+    valid.
 
-    cmdlist
-        Prints all commands that can be bound to keys.
-
-    js-dev
-        Specifies the joystick device to use (default: ``/dev/input/js0``).
-
-    file=<filename>
-        Read commands from the given file. Mostly useful with a FIFO.
-        See also ``--slave``.
-
-        *NOTE*: When the given file is a FIFO mpv opens both ends so you
-        can do several `echo "seek 10" > mp_pipe` and the pipe will stay
-        valid.
-
-    test
-        Input test mode. Instead of executing commands on key presses, mpv
-        will show the keys and the bound commands on the OSD. Has to be used
-        with a dummy video, and the normal ways to quit the player will not
-        work (key bindings that normally quit will be shown on OSD only, just
-        like any other binding).
+--input-test
+    Input test mode. Instead of executing commands on key presses, mpv
+    will show the keys and the bound commands on the OSD. Has to be used
+    with a dummy video, and the normal ways to quit the player will not
+    work (key bindings that normally quit will be shown on OSD only, just
+    like any other binding).
 
 --ipv4-only-proxy
     Skip any HTTP proxy for IPv6 addresses. It will still be used for IPv4
@@ -1160,6 +1165,29 @@
     :fps=<value>:  output fps (default: 25)
     :type=<value>: input file type (available: jpeg, png, tga, sgi)
 
+--mkv-subtitle-preroll
+    Try harder to show embedded soft subtitles when seeking somewhere. Normally,
+    it can happen that the subtitle at the seek target is not shown due to how
+    some container file formats are designed. The subtitles appear only if
+    seeking before or exactly to the position a subtitle first appears. To
+    make this worse, subtitles are often timed to appear a very small amount
+    before the associated video frame, so that seeking to the video frame
+    typically does not demux the subtitle at that position.
+
+    Enabling this option makes the demuxer start reading data a bit before the
+    seek target, so that subtitles appear correctly. Note that this makes
+    seeking slower, and is not guaranteed to always work. It only works if the
+    subtitle is close enough to the seek target.
+
+    Works with the internal Matroska demuxer only. Always enabled for absolute
+    and hr-seeks, and this option changes behavior with relative or imprecise
+    seeks only.
+
+    See also ``--hr-seek-demuxer-offset`` option. This option can achieve a
+    similar effect, but only if hr-seek is active. It works with any demuxer,
+    but makes seeking much slower, as it has to decode audio and video data,
+    instead of just skipping over it.
+
 --mixer=<device>
     Use a mixer device different from the default ``/dev/mixer``. For ALSA
     this is the mixer name.
@@ -1239,6 +1267,12 @@
 --name
     Set the window class name for X11-based video output methods.
 
+--native-keyrepeat
+    Use system settings for keyrepeat delay and rate, instead of
+    ``--input-ar-delay`` and ``--input-ar-rate``. (Whether this applies
+    depends on the VO backend and how it handles keyboard input. Does not
+    apply to terminal input.)
+
 --avi-ni
     (Internal AVI demuxer which is not used by default only)
     Force usage of non-interleaved AVI parser (fixes playback of some bad AVI
@@ -1260,17 +1294,16 @@
     Disables colorkeying. Only supported by the xv (see ``--vo=xv:ck``) video
     output driver.
 
---no-config=<options>
-    Do not parse selected configuration files.
+--no-config
+    Do not load default configuration files. This prevents loading of
+    ``~/.mpv/config`` and ``~/.mpv/input.conf``, as well as loading the
+    same files from system wide configuration directories.
 
-    *NOTE*: If ``--include`` or ``--use-filedir-conf`` options are specified
-    at the command line, they will be honoured.
+    Loading of some configuration files is not affected by this option, such
+    as configuration files for cddb, DVB code and fontconfig.
 
-    Available options are:
-
-    :all:    all configuration files
-    :system: system configuration file
-    :user:   user configuration file
+    *NOTE*: Files explicitly requested by command line options, like
+    ``--include`` or ``--use-filedir-conf``, will still be loaded.
 
 --no-idx
     Do not use index present in the file even if one is present.
@@ -1278,6 +1311,10 @@
 --no-audio
     Do not play sound. With some demuxers this may not work. In those cases
     you can try ``--ao=null`` instead.
+
+--no-resume-playback
+    Do not restore playback position from ``~/.mpv/watch_later/``.
+    See ``quit_watch_later`` input command.
 
 --no-sub
     Disables display of internal and external subtitles.
@@ -1296,8 +1333,32 @@
     search for video segments from other files, and will also ignore any
     chapter order specified for the main file.
 
+--no-osd-bar, --osd-bar
+    Disable display of the OSD bar. This will make some things (like seeking)
+    use OSD text messages instead of the bar.
+
+    You can configure this on a per-command basis in input.conf using ``osd-``
+    prefixes, see ``Input command prefixes``. If you want to disable the OSD
+    completely, use ``--osd-level=0``.
+
+--osd-bar-align-x=<-1-1>
+    Position of the OSD bar. -1 is far left, 0 is centered, 1 is far right.
+
+--osd-bar-align-y=<-1-1>
+    Position of the OSD bar. -1 is top, 0 is centered, 1 is bottom.
+
+--osd-bar-w=<1-100>
+    Width of the OSD bar, in percentage of the screen width (default: 75).
+    A value of 0.5 means the bar is half the screen wide.
+
+--osd-bar-h=<0.1-50>
+    Height of the OSD bar, in percentage of the screen height (default: 3.125).
+
 --osd-back-color=<#RRGGBB>, --sub-text-back-color=<#RRGGBB>
     See ``--osd-color``. Color used for OSD/sub text background.
+
+--osd-blur=<0..20.0>, --sub-text-blur=<0..20.0>
+    Gaussian blur factor. 0 means no blur applied (default).
 
 --osd-border-color=<#RRGGBB>, --sub-text-border-color=<#RRGGBB>
     See ``--osd-color``. Color used for the OSD/sub font border.
@@ -1382,6 +1443,9 @@
 
     Default: 10.
 
+--osd-scale=<factor>
+    OSD font size multiplicator, multiplied with ``--osd-font-size`` value.
+
 --osd-shadow-color=<#RRGGBB>, --sub-text-shadow-color=<#RRGGBB>
     See ``--osd-color``. Color used for OSD/sub text shadow.
 
@@ -1397,6 +1461,12 @@
     values are allowed.
 
     Default: 0.
+
+--osd-status-msg=<string>
+    Show a custom string during playback instead of the standard status text.
+    This overrides the status text used for ``--osd-level=3``, when using the
+    ``show_progress`` command (by default mapped to ``P``), or in some
+    non-default cases when seeking. Expands properties. See ``--playing-msg``.
 
 --overlapsub
     Allows the next subtitle to be displayed while the current one is still
@@ -1424,8 +1494,8 @@
     *WARNING*: works with the deprecated ``mp_http://`` protocol only.
 
 --playing-msg=<string>
-    Print out a string before starting playback. The string is expanded for
-    properties, e.g. ``--playing-msg=file: \${filename}`` will print the string
+    Print out a string after starting playback. The string is expanded for
+    properties, e.g. ``--playing-msg=file: ${filename}`` will print the string
     ``file:`` followed by a space and the currently played filename.
 
     The following expansions are supported:
@@ -1433,7 +1503,7 @@
     \${NAME}
         Expands to the value of the property ``NAME``. If ``NAME`` starts with
         ``=``, use the raw value of the property. If retrieving the property
-        fails, expand to an error string. (Use ``\${NAME:}`` with a trailing
+        fails, expand to an error string. (Use ``${NAME:}`` with a trailing
         ``:`` to expand to an empty string instead.)
     \${NAME:STR}
         Expands to the value of the property ``NAME``, or ``STR`` if the
@@ -1444,17 +1514,35 @@
     \${?NAME:STR}
         Expands to ``STR`` (recursively) if the property ``NAME`` is available.
     \$\$
-        Expands to ``\$``.
+        Expands to ``$``.
     \$}
         Expands to ``}``. (To produce this character inside recursive
         expansion.)
     \$>
-        Disable property expansion and special handling of ``\$`` for the rest
+        Disable property expansion and special handling of ``$`` for the rest
         of the string.
+
+    This option also parses C-style escapes. Example:
+
+    - ``\n`` becomes a newline character
+    - ``\\`` expands to ``\``
 
 --status-msg=<string>
     Print out a custom string during playback instead of the standard status
     line. Expands properties. See ``--playing-msg``.
+
+--stream-capture=<filename>
+    Allows capturing the primary stream (not additional audio tracks or other
+    kind of streams) into the given file. Capturing can also be started and
+    stopped changing the filename with the ``stream-capture`` slave property.
+    Generally this will not produce usable results for anything else than MPEG
+    or raw streams, unless capturing includes the file headers and is not
+    interrupted. Note that, due to cache latencies, captured data may begin and
+    end somewhat delayed compared to what you see displayed.
+
+--stream-dump=<filename>
+    Same as ``--stream-capture``, but don't start playback. Instead, the full
+    file is dumped.
 
 --playlist=<filename>
     Play files according to a playlist file (ASX, Winamp, SMIL, or
@@ -1607,12 +1695,6 @@
     volume=<0..100>
         sound volume for radio device (default 100)
 
-    freq_min=<value> (\*BSD BT848 only)
-        minimum allowed frequency (default: 87.50)
-
-    freq_max=<value> (\*BSD BT848 only)
-        maximum allowed frequency (default: 108.00)
-
     channels=<frequency>-<name>,<frequency>-<name>,...
         Set channel list. Use _ for spaces in names (or play with quoting ;-).
         The channel names will then be written using OSD and the slave
@@ -1657,7 +1739,6 @@
     Available options are:
 
     :fps=<value>:                  rate in frames per second (default: 25.0)
-    :sqcif|qcif|cif|4cif|pal|ntsc: set standard image size
     :w=<value>:                    image width in pixels
     :h=<value>:                    image height in pixels
     :format=<value>:               colorspace (fourcc) in hex or string
@@ -1665,12 +1746,11 @@
     :mp-format=<value>:            colorspace by internal video format
                                    Use ``--rawvideo=mp-format=help``
                                    for a list of possible formats.
+    :codec:                        set the video codec (instead of selecting
+                                   the rawvideo codec)
     :size=<value>:                 frame size in Bytes
 
     *EXAMPLE*:
-
-    - ``mpv foreman.qcif --demuxer=rawvideo --rawvideo=qcif`` Play the
-      famous "foreman" sample video.
 
     - ``mpv sample-720x576.yuv --demuxer=rawvideo --rawvideo=w=720:h=576``
       Play a raw YUV sample.
@@ -1681,23 +1761,63 @@
 --referrer=<string>
     Specify a referrer path or URL for HTTP requests.
 
+--reset-on-next-file=<all|option1,option2,...>
+    Normally, mpv will try to keep all settings when playing the next file on
+    the playlist, even if they were changed by the user during playback. (This
+    behavior is the opposite of MPlayer's, which tries to reset all settings
+    when starting next file.)
+
+    This can be changed with this option. It accepts a list of options, and
+    mpv will reset the value of these options on playback start to the initial
+    value. The initial value is either the default value, or as set by the
+    config file or command line.
+
+    In some cases, this might not work as expected. For example, ``--volume``
+    will only be reset the volume if it's explicitly set in the config file
+    or the command line.
+
+    The special name ``all`` resets as many options as possible.
+
+    *EXAMPLE*:
+
+    - ``--reset-on-next-file=fullscreen,speed`` Reset fullscreen and playback
+      speed settings if they were changed during playback.
+    - ``--reset-on-next-file=all`` Try to reset all settings that were changed
+      during playback.
+
 --reuse-socket
     (udp:// only)
     Allows a socket to be reused by other processes as soon as it is closed.
-
---rootwin
-    Play movie in the root window (desktop background). Desktop background
-    images may cover the movie window, though. May not work with all video
-    output drivers.
 
 --saturation=<-100-100>
     Adjust the saturation of the video signal (default: 0). You can get
     grayscale output with this option. Not supported by all video output
     drivers.
 
+--save-position-on-quit
+    Always save the current playback position on quit. When this file is
+    played again later, the player will seek to the old playback position on
+    start. This affects any form of stopping playback (quitting, going to the
+    next file).
+
+    This behavior is disabled by default, but is always available when quitting
+    the player with Shift+Q.
+
 --sb=<n>
     Seek to byte position. Useful for playback from CD-ROM images or VOB files
     with junk at the beginning. See also ``--start``.
+
+--screen=<default|0-32>
+    In multi-monitor configurations (i.e. a single desktop that spans across
+    multiple displays) this option tells mpv which screen to display the
+    movie on.
+
+    This option doesn't always work. In these cases, try to use ``--geometry``
+    to position the window explicitly.
+
+    *NOTE (X11)*: this option does not work properly with all window managers.
+
+    See also ``--fs-screen``.
 
 --screenshot-format=<type>
     Set the image file type used for saving screenshots.
@@ -1857,9 +1977,8 @@
 --srate=<Hz>
     Select the output sample rate to be used (of course sound cards have
     limits on this). If the sample frequency selected is different from that
-    of the current media, the resample or lavcresample audio filter will be
-    inserted into the audio filter layer to compensate for the difference. The
-    type of resampling can be controlled by the ``--af-adv`` option.
+    of the current media, the lavrresample audio filter will be
+    inserted into the audio filter layer to compensate for the difference.
 
 --start=<relative time>
     Seek to given time position.
@@ -2068,13 +2187,10 @@
 
     driver=<value>
         See ``--tv=driver=help`` for a list of compiled-in TV input drivers.
-        available: dummy, v4l, v4l2, bsdbt848 (default: autodetect)
+        available: dummy, v4l2 (default: autodetect)
 
     device=<value>
-        Specify TV device (default: ``/dev/video0``). NOTE: For the bsdbt848
-        driver you can provide both bktr and tuner device names separating
-        them with a comma, tuner after bktr (e.g. ``--tv
-        device=/dev/bktr1,/dev/tuner1``).
+        Specify TV device (default: ``/dev/video0``).
 
     input=<value>
         Specify input (default: 0 (TV), see console output for available
@@ -2102,8 +2218,7 @@
         maximum size of the capture buffer in megabytes (default: dynamical)
 
     norm=<value>
-        For bsdbt848 and v4l, PAL, SECAM, NTSC are available. For v4l2, see
-        the console output for a list of all available norms, also see the
+        See the console output for a list of all available norms, also see the
         normid option below.
 
     normid=<value> (v4l2 only)
@@ -2278,14 +2393,16 @@
     Increment verbosity level, one level for each ``-v`` found on the command
     line.
 
---vc=<[-\|+]codec1,[-\|+]codec2,...[,]>
-    Specify a priority list of video codecs to be used, according to their
-    codec name in ``codecs.conf``. Use a '-' before the codec name to omit it.
-    Use a '+' before the codec name to force it, this will likely crash! If
-    the list has a trailing ',' mpv will fall back on codecs not contained
-    in the list.
+--vd=<[+|-]family1:(*|decoder1),[+|-]family2:(*|decoder2),...[-]>
+    Specify a priority list of video decoders to be used, according to their
+    family and name. See ``--ad`` for further details. Both of these options
+    use the same syntax and semantics, the only difference is that they
+    operate on different codec lists.
 
-    *NOTE*: See ``--vc=help`` for a full list of available codecs.
+    *NOTE*: See ``--vd=help`` for a full list of available decoders.
+
+--version, -V
+    Print version string and exit.
 
 --vf=<filter1[=parameter1:parameter2:...],filter2,...>
     Specify a list of video filters to apply to the video stream. See
@@ -2294,19 +2411,8 @@
     ``--vf-clr`` exist to modify a previously specified list, but you
     shouldn't need these for typical use.
 
---vfm=<driver1,driver2,...>
-    Specify a priority list of video codec families to be used, according to
-    their names in codecs.conf. Falls back on the default codecs if none of
-    the given codec families work.
-
-    *NOTE*: See ``--vfm=help`` for a full list of available codec families.
-
 --vid=<ID|auto|no>
     Select video channel. ``auto`` selects the default, ``no`` disables video.
-
---vm
-    Try to change to a different video mode. Supported by the x11 and xv video
-    output drivers.
 
 --vo=<driver1[:suboption1[=value]:...],driver2,...[,]>
     Specify a priority list of video output drivers to be used. For
@@ -2322,21 +2428,12 @@
     Set the startup volume. A value of -1 (the default) will not change the
     volume. See also ``--softvol``.
 
---no-vsync
-    Tries to disable vsync. (Effective with some video outputs only.)
-
 --wid=<ID>
     (X11 and win32 only)
-    This tells mpv to attach to an existing window.See ``--slave-broken``.
+    This tells mpv to attach to an existing window. The ID is interpreted as
+    "Window" on X11, and as HWND on win32. If a VO is selected that supports
+    this option, a new window will be created and the given window will be set
+    as parent. The window will always be resized to cover the parent window
+    fully, and will add black bars to compensate for the video aspect ratio.
 
---screen=<all|current|0-32>
-    In multi-monitor configurations (i.e. a single desktop that spans across
-    multiple displays) this option tells mpv which screen to display the
-    movie on. A value of ``all`` means fullscreen across the whole virtual display
-    (in this case system provided information is completely ignored), ``current`` means
-    fullscreen on the display the window currently is on. The initial position
-    set via the ``--geometry`` option is relative to the specified screen.
-    Will usually only work with ``--fstype=-fullscreen`` or ``--fstype=none``.
-    This option is not suitable to only set the startup screen (because it
-    will always display on the given screen in fullscreen mode),
-    ``--geometry`` is the best that is available for that purpose currently.
+    See ``--slave-broken``.

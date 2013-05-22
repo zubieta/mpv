@@ -25,8 +25,6 @@
 #include "core/mp_msg.h"
 #include "core/options.h"
 
-#include "core/codec-cfg.h"
-
 #include "video/img_format.h"
 
 #include "stream/stream.h"
@@ -74,7 +72,7 @@ int mpcodecs_config_vo(sh_video_t *sh, int w, int h, unsigned int out_fmt)
     mp_msg(MSGT_DECVIDEO, MSGL_V, "VDec: vo config request - %d x %d (%s)\n",
            w, h, vo_format_name(out_fmt));
 
-    if (get_video_quality_max(sh) <= 0 && divx_quality) {
+    if (get_video_quality_max(sh) <= 0 && opts->divx_quality) {
         // user wants postprocess but no pp filter yet:
         sh->vfilter = vf = vf_open_filter(opts, vf, "pp", NULL);
     }
@@ -114,7 +112,7 @@ int mpcodecs_config_vo(sh_video_t *sh, int w, int h, unsigned int out_fmt)
     sh->vfilter = vf;
 
     // autodetect flipping
-    bool flip = !!opts->flip != !!(sh->codec->flags & CODECS_FLAG_FLIP);
+    bool flip = opts->flip;
     if (flip && !(sh->output_flags & VFCAP_FLIP)) {
         // we need to flip, but no flipping filter avail.
         vf_add_before_vo(&vf, "flip", NULL);
@@ -149,9 +147,8 @@ int mpcodecs_config_vo(sh_video_t *sh, int w, int h, unsigned int out_fmt)
         mp_msg(MSGT_IDENTIFY, MSGL_INFO, "ID_VIDEO_ASPECT=%1.4f\n", sh->aspect);
     }
 
-    vocfg_flags = (opts->fullscreen ? VOFLAG_FULLSCREEN : 0)
-        | (opts->vidmode ? VOFLAG_MODESWITCHING : 0)
-        | (flip ? VOFLAG_FLIPPING : 0);
+    vocfg_flags = (opts->fullscreen ? VOFLAG_FULLSCREEN : 0) |
+                  (flip ? VOFLAG_FLIPPING : 0);
 
     // Time to config libvo!
     mp_msg(MSGT_CPLAYER, MSGL_V,
@@ -172,16 +169,16 @@ int mpcodecs_config_vo(sh_video_t *sh, int w, int h, unsigned int out_fmt)
 
     set_video_colorspace(sh);
 
-    if (opts->vo_gamma_gamma != 1000)
-        set_video_colors(sh, "gamma", opts->vo_gamma_gamma);
-    if (opts->vo_gamma_brightness != 1000)
-        set_video_colors(sh, "brightness", opts->vo_gamma_brightness);
-    if (opts->vo_gamma_contrast != 1000)
-        set_video_colors(sh, "contrast", opts->vo_gamma_contrast);
-    if (opts->vo_gamma_saturation != 1000)
-        set_video_colors(sh, "saturation", opts->vo_gamma_saturation);
-    if (opts->vo_gamma_hue != 1000)
-        set_video_colors(sh, "hue", opts->vo_gamma_hue);
+    if (opts->gamma_gamma != 1000)
+        set_video_colors(sh, "gamma", opts->gamma_gamma);
+    if (opts->gamma_brightness != 1000)
+        set_video_colors(sh, "brightness", opts->gamma_brightness);
+    if (opts->gamma_contrast != 1000)
+        set_video_colors(sh, "contrast", opts->gamma_contrast);
+    if (opts->gamma_saturation != 1000)
+        set_video_colors(sh, "saturation", opts->gamma_saturation);
+    if (opts->gamma_hue != 1000)
+        set_video_colors(sh, "hue", opts->gamma_hue);
 
     return 1;
 }

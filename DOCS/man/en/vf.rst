@@ -97,7 +97,7 @@ rotate[=<0-7>]
     :2: Rotate by 90 degrees counterclockwise.
     :3: Rotate by 90 degrees counterclockwise and flip.
 
-scale[=w:h[:interlaced[:chr_drop[:par[:par2[:presize[:noup[:arnd]]]]]]]]
+scale[=w:h[:interlaced[:chr_drop[:par[:par2[:noup[:arnd]]]]]]]
     Scales the image with the software scaler (slow) and performs a YUV<->RGB
     colorspace conversion (see also ``--sws``).
 
@@ -141,16 +141,6 @@ scale[=w:h[:interlaced[:chr_drop[:par[:par2[:presize[:noup[:arnd]]]]]]]]
         --sws=7 (gaussian): sharpness (0 (soft) - 100 (sharp))
 
         --sws=9 (lanczos):  filter length (1-10)
-
-    <presize>
-        Scale to preset sizes.
-
-        :qntsc: 352x240 (NTSC quarter screen)
-        :qpal:  352x288 (PAL quarter screen)
-        :ntsc:  720x480 (standard NTSC)
-        :pal:   720x576 (standard PAL)
-        :sntsc: 640x480 (square pixel NTSC)
-        :spal:  768x576 (square pixel PAL)
 
     <noup>
         Disallow upscaling past the original dimensions.
@@ -376,6 +366,45 @@ pp[=filter1[:option1[:option2...]]/[-]filter2...]
     ``--vf=pp=hb:y/vb:a``
         Horizontal deblocking on luminance only, and switch vertical
         deblocking on or off automatically depending on available CPU time.
+
+lavfi=graph[:sws_flags]
+    Filter video using ffmpeg's libavfilter.
+
+    <graph>
+        The libavfilter graph string. The filter must have a single video input
+        pad and a single video output pad.
+
+        See ``https://ffmpeg.org/ffmpeg-filters.html`` for syntax and available
+        filters.
+
+        *WARNING*: if you want to use the full filter syntax with this option,
+        you have to quote the filter graph in order to prevent mpv's syntax
+        and the filter graph syntax from clashing.
+
+        *EXAMPLE*:
+
+        ``-vf lavfi=[gradfun=20:30,vflip]``
+            gradfun filter with nonsense parameters, followed by a vflip
+            filter. (This demonstrates how libavfilter takes a graph and not
+            just a single filter.) The filter graph string is quoted with
+            ``[`` and ``]``. This requires no additional quoting or escaping
+            with some shells (like bash), while others (like zsh) require
+            additional ``"`` quotes around the option string.
+
+        ``'--vf=lavfi="gradfun=20:30,vflip"'``
+            same as before, but uses quoting that should be safe with all
+            shells. The outer ``'`` quotes make sure that the shell doesn't
+            remove the ``"`` quotes needed by mpv.
+
+        ``'--vf=lavfi=graph="gradfun=radius=30:strength=20,vflip"'``
+            same as before, but uses named parameters for everything.
+
+    <sws_flags>
+        If libavfilter inserts filters for pixel format conversion, this
+        option gives the flags which should be passed to libswscale. This
+        option is numeric and takes a bit-wise combination of ``SWS_`` flags.
+
+        See ``http://git.videolan.org/?p=ffmpeg.git;a=blob;f=libswscale/swscale.h``.
 
 noise[=luma[u][t|a][h][p]:chroma[u][t|a][h][p]]
     Adds noise.
@@ -611,7 +640,7 @@ phase[=t|b|p|a|u|T|B|A|U][:v]
         average squared difference between fields for t, b, and p
         alternatives.
 
-yadif=[mode[:field_dominance]]
+yadif=[mode[:enabled=yes|no]]
     Yet another deinterlacing filter
 
     <mode>
@@ -620,11 +649,10 @@ yadif=[mode[:field_dominance]]
         :2: Like 0 but skips spatial interlacing check.
         :3: Like 1 but skips spatial interlacing check.
 
-    <field_dominance> (DEPRECATED)
-        Operates like tfields.
-
-        *NOTE*: This option will possibly be removed in a future version. Use
-        ``--field-dominance`` instead.
+    <enabled>
+        :yes: Filter is active (default).
+        :no:  Filter is not active, but can be deactivated with the ``D`` key
+              (or any other key that toggles the ``deinterlace`` property).
 
 down3dright[=lines]
     Reposition and resize stereoscopic images. Extracts both stereo fields and

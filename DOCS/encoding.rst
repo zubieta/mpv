@@ -67,7 +67,7 @@ Typical MPEG-4 Part 10 ("AVC", "H.264") encoding, Matroska (MKV) container::
 
   mpv infile -o outfile.mkv \
     -ovc libx264 -ovcopts preset=medium,crf=23,profile=baseline \
-    -oac vorbis -oacopts qscale=3
+    -oac libvorbis -oacopts qscale=3
 
 Typical MPEG-4 Part 10 ("AVC", "H.264") encoding, MPEG-4 (MP4) container::
 
@@ -90,10 +90,12 @@ As the options for various devices can get complex, profiles can be used.
 
 An example profile file for encoding is provided in
 etc/encoding-example-profiles.conf in the source tree. You can include it into
-your configuration by doing, from the mpv-build directory::
+your configuration by doing::
 
   mkdir -p ~/.mpv
-  echo "include = $PWD/mpv/etc/encoding-example-profiles.conf" >> ~/.mpv/config
+  curl https://raw.github.com/mpv-player/mpv/master/etc/encoding-example-profiles.conf \
+    > ~/.mpv/encoding-profiles.conf
+  echo "include = $HOME/.mpv/encoding-profiles.conf" >> ~/.mpv/config
 
 Refer to the top of that file for more comments - in a nutshell, the following
 options are added by it::

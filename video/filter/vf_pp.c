@@ -75,8 +75,11 @@ static int query_format(struct vf_instance *vf, unsigned int fmt){
     case IMGFMT_444P:
     case IMGFMT_422P:
     case IMGFMT_420P:
-    case IMGFMT_411P:
-	return vf_next_query_format(vf,fmt);
+    case IMGFMT_411P: ;
+	int caps = vf_next_query_format(vf,fmt);
+        if (caps)
+            caps |= VFCAP_POSTPROC;
+        return caps;
     }
     return 0;
 }
@@ -128,8 +131,6 @@ static struct mp_image *filter(struct vf_instance *vf, struct mp_image *mpi)
 
 //===========================================================================//
 
-extern int divx_quality;
-
 static const unsigned int fmt_list[]={
     IMGFMT_420P,
     IMGFMT_444P,
@@ -146,7 +147,6 @@ static int vf_open(vf_instance_t *vf, char *args){
     vf->config=config;
     vf->filter=filter;
     vf->uninit=uninit;
-    vf->default_caps=VFCAP_POSTPROC;
     vf->priv=malloc(sizeof(struct vf_priv_s));
     vf->priv->context=NULL;
 

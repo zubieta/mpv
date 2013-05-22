@@ -126,6 +126,8 @@ static void flip_page(struct vo *vo)
 {
     struct priv *p = vo->priv;
 
+    (p->frame)++;
+
     void *t = talloc_new(NULL);
     char *filename = talloc_asprintf(t, "%08d.%s", p->frame,
                                      image_writer_file_ext(p->opts));
@@ -138,14 +140,12 @@ static void flip_page(struct vo *vo)
 
     talloc_free(t);
     mp_image_unrefp(&p->current);
-
-    (p->frame)++;
 }
 
 static int query_format(struct vo *vo, uint32_t fmt)
 {
     if (mp_sws_supported_format(fmt))
-        return VFCAP_CSP_SUPPORTED | VFCAP_CSP_SUPPORTED_BY_HW | VFCAP_OSD;
+        return VFCAP_CSP_SUPPORTED | VFCAP_CSP_SUPPORTED_BY_HW;
     return 0;
 }
 
@@ -180,7 +180,6 @@ static int control(struct vo *vo, uint32_t request, void *data)
     return VO_NOTIMPL;
 }
 
-#undef OPT_BASE_STRUCT
 #define OPT_BASE_STRUCT struct priv
 
 const struct vo_driver video_out_image =
@@ -196,7 +195,7 @@ const struct vo_driver video_out_image =
         .colorspace = MP_CSP_DETAILS_DEFAULTS,
     },
     .options = (const struct m_option[]) {
-        OPT_SUBSTRUCT(opts, image_writer_conf, M_OPT_MERGE),
+        OPT_SUBSTRUCT("", opts, image_writer_conf, 0),
         OPT_STRING("outdir", outdir, 0),
         {0},
     },

@@ -32,9 +32,13 @@
 #include <dsound.h>
 #include <math.h>
 
+#include <libavutil/avutil.h>
+#include <libavutil/common.h>
+
 #include "config.h"
 #include "audio/format.h"
 #include "ao.h"
+#include "audio/reorder_ch.h"
 #include "audio_out_internal.h"
 #include "core/mp_msg.h"
 #include "osdep/timer.h"
@@ -60,26 +64,6 @@ LIBAO_EXTERN(dsound)
 
 static const GUID KSDATAFORMAT_SUBTYPE_PCM = {0x1,0x0000,0x0010, {0x80,0x00,0x00,0xaa,0x00,0x38,0x9b,0x71}};
 
-#define SPEAKER_FRONT_LEFT             0x1
-#define SPEAKER_FRONT_RIGHT            0x2
-#define SPEAKER_FRONT_CENTER           0x4
-#define SPEAKER_LOW_FREQUENCY          0x8
-#define SPEAKER_BACK_LEFT              0x10
-#define SPEAKER_BACK_RIGHT             0x20
-#define SPEAKER_FRONT_LEFT_OF_CENTER   0x40
-#define SPEAKER_FRONT_RIGHT_OF_CENTER  0x80
-#define SPEAKER_BACK_CENTER            0x100
-#define SPEAKER_SIDE_LEFT              0x200
-#define SPEAKER_SIDE_RIGHT             0x400
-#define SPEAKER_TOP_CENTER             0x800
-#define SPEAKER_TOP_FRONT_LEFT         0x1000
-#define SPEAKER_TOP_FRONT_CENTER       0x2000
-#define SPEAKER_TOP_FRONT_RIGHT        0x4000
-#define SPEAKER_TOP_BACK_LEFT          0x8000
-#define SPEAKER_TOP_BACK_CENTER        0x10000
-#define SPEAKER_TOP_BACK_RIGHT         0x20000
-#define SPEAKER_RESERVED               0x80000000
-
 #if 0
 #define DSSPEAKER_HEADPHONE         0x00000001
 #define DSSPEAKER_MONO              0x00000002
@@ -102,13 +86,6 @@ typedef struct {
     GUID            SubFormat;
 } WAVEFORMATEXTENSIBLE, *PWAVEFORMATEXTENSIBLE;
 #endif
-
-static const int channel_mask[] = {
-  SPEAKER_FRONT_LEFT   | SPEAKER_FRONT_RIGHT  | SPEAKER_LOW_FREQUENCY,
-  SPEAKER_FRONT_LEFT   | SPEAKER_FRONT_RIGHT  | SPEAKER_BACK_LEFT    | SPEAKER_BACK_RIGHT,
-  SPEAKER_FRONT_LEFT   | SPEAKER_FRONT_RIGHT  | SPEAKER_BACK_LEFT    | SPEAKER_BACK_RIGHT   | SPEAKER_LOW_FREQUENCY,
-  SPEAKER_FRONT_LEFT   | SPEAKER_FRONT_CENTER | SPEAKER_FRONT_RIGHT  | SPEAKER_BACK_LEFT    | SPEAKER_BACK_RIGHT     | SPEAKER_LOW_FREQUENCY
-};
 
 static HINSTANCE hdsound_dll = NULL;      ///handle to the dll
 static LPDIRECTSOUND hds = NULL;          ///direct sound object
@@ -329,32 +306,14 @@ static int write_buffer(unsigned char *data, int len)
 
   if (SUCCEEDED(res))
   {
-  	if( (ao_data.channels == 6) && !AF_FORMAT_IS_AC3(ao_data.format) ) {
-  	    // reorder channels while writing to pointers.
-  	    // it's this easy because buffer size and len are always
-  	    // aligned to multiples of channels*bytespersample
-  	    // there's probably some room for speed improvements here
-  	    const int chantable[6] = {0, 1, 4, 5, 2, 3}; // reorder "matrix"
-  	    int i, j;
-  	    int numsamp,sampsize;
-
-  	    sampsize = af_fmt2bits(ao_data.format)>>3; // bytes per sample
-  	    numsamp = dwBytes1 / (ao_data.channels * sampsize);  // number of samples for each channel in this buffer
-
-  	    for( i = 0; i < numsamp; i++ ) for( j = 0; j < ao_data.channels; j++ ) {
-                memcpy((char*)lpvPtr1+(i*ao_data.channels*sampsize)+(chantable[j]*sampsize),data+(i*ao_data.channels*sampsize)+(j*sampsize),sampsize);
-  	    }
-
-  	    if (NULL != lpvPtr2 )
-  	    {
-  	        numsamp = dwBytes2 / (ao_data.channels * sampsize);
-  	        for( i = 0; i < numsamp; i++ ) for( j = 0; j < ao_data.channels; j++ ) {
-                    memcpy((char*)lpvPtr2+(i*ao_data.channels*sampsize)+(chantable[j]*sampsize),data+dwBytes1+(i*ao_data.channels*sampsize)+(j*sampsize),sampsize);
-  	        }
-  	    }
+  	if (!AF_FORMAT_IS_AC3(ao_data.format)) {
+            memcpy(lpvPtr1, data, dwBytes1);
+            if (lpvPtr2 != NULL)
+                memcpy(lpvPtr2, (char *)data + dwBytes1, dwBytes2);
 
   	    write_offset+=dwBytes1+dwBytes2;
-  	    if(write_offset>=buffer_size)write_offset=dwBytes2;
+  	    if(write_offset>=buffer_size)
+                write_offset=dwBytes2;
   	} else {
   	    // Write to pointers without reordering.
 	memcpy(lpvPtr1,data,dwBytes1);
@@ -418,7 +377,7 @@ static int control(int cmd, void *arg)
 \param flags unused
 \return 1=success 0=fail
 */
-static int init(int rate, int channels, int format, int flags)
+static int init(int rate, const struct mp_chmap *channels, int format, int flags)
 {
     int res;
 	if (!InitDirectSound()) return 0;
@@ -431,15 +390,14 @@ static int init(int rate, int channels, int format, int flags)
 	DSBUFFERDESC dsbpridesc;
 	DSBUFFERDESC dsbdesc;
 
-	//check if the channel count and format is supported in general
-	if (channels > 6) {
-		UninitDirectSound();
-		mp_msg(MSGT_AO, MSGL_ERR, "ao_dsound: 8 channel audio not yet supported\n");
-		return 0;
-	}
-
-	if (AF_FORMAT_IS_AC3(format))
+	if (AF_FORMAT_IS_AC3(format)) {
 		format = AF_FORMAT_AC3_NE;
+        } else {
+                struct mp_chmap_sel sel = {0};
+                mp_chmap_sel_add_waveext(&sel);
+                if (!ao_chmap_sel_adjust(&ao_data, &sel, &ao_data.channels))
+                        return 0;
+        }
 	switch(format){
 		case AF_FORMAT_AC3_NE:
 		case AF_FORMAT_S24_LE:
@@ -451,25 +409,24 @@ static int init(int rate, int channels, int format, int flags)
 			format=AF_FORMAT_S16_LE;
 	}
 	//fill global ao_data
-	ao_data.channels = channels;
 	ao_data.samplerate = rate;
 	ao_data.format = format;
-	ao_data.bps = channels * rate * (af_fmt2bits(format)>>3);
+	ao_data.bps = ao_data.channels.num * rate * (af_fmt2bits(format)>>3);
 	if(ao_data.buffersize==-1) ao_data.buffersize = ao_data.bps; // space for 1 sec
-	mp_msg(MSGT_AO, MSGL_V,"ao_dsound: Samplerate:%iHz Channels:%i Format:%s\n", rate, channels, af_fmt2str_short(format));
+	mp_msg(MSGT_AO, MSGL_V,"ao_dsound: Samplerate:%iHz Channels:%i Format:%s\n", rate, ao_data.channels.num, af_fmt2str_short(format));
 	mp_msg(MSGT_AO, MSGL_V,"ao_dsound: Buffersize:%d bytes (%d msec)\n", ao_data.buffersize, ao_data.buffersize / ao_data.bps * 1000);
 
 	//fill waveformatex
 	ZeroMemory(&wformat, sizeof(WAVEFORMATEXTENSIBLE));
-	wformat.Format.cbSize          = (channels > 2) ? sizeof(WAVEFORMATEXTENSIBLE)-sizeof(WAVEFORMATEX) : 0;
-	wformat.Format.nChannels       = channels;
+	wformat.Format.cbSize          = (ao_data.channels.num > 2) ? sizeof(WAVEFORMATEXTENSIBLE)-sizeof(WAVEFORMATEX) : 0;
+	wformat.Format.nChannels       = ao_data.channels.num;
 	wformat.Format.nSamplesPerSec  = rate;
 	if (AF_FORMAT_IS_AC3(format)) {
 		wformat.Format.wFormatTag      = WAVE_FORMAT_DOLBY_AC3_SPDIF;
 		wformat.Format.wBitsPerSample  = 16;
 		wformat.Format.nBlockAlign     = 4;
 	} else {
-		wformat.Format.wFormatTag      = (channels > 2) ? WAVE_FORMAT_EXTENSIBLE : WAVE_FORMAT_PCM;
+		wformat.Format.wFormatTag      = (ao_data.channels.num > 2) ? WAVE_FORMAT_EXTENSIBLE : WAVE_FORMAT_PCM;
 		wformat.Format.wBitsPerSample  = af_fmt2bits(format);
 		wformat.Format.nBlockAlign     = wformat.Format.nChannels * (wformat.Format.wBitsPerSample >> 3);
 	}
@@ -489,8 +446,8 @@ static int init(int rate, int channels, int format, int flags)
 	                | DSBCAPS_GLOBALFOCUS         /** Allows background playing */
 	                | DSBCAPS_CTRLVOLUME;         /** volume control enabled */
 
-	if (channels > 2) {
-		wformat.dwChannelMask = channel_mask[channels - 3];
+	if (ao_data.channels.num > 2) {
+		wformat.dwChannelMask = mp_chmap_to_waveext(&ao_data.channels);
 		wformat.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
 		wformat.Samples.wValidBitsPerSample = wformat.Format.wBitsPerSample;
 		// Needed for 5.1 on emu101k - shit soundblaster

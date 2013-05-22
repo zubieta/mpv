@@ -45,11 +45,10 @@ SOURCES-$(LIBBS2B)              += audio/filter/af_bs2b.c
 SOURCES-$(LIBPOSTPROC)          += video/filter/vf_pp.c
 SOURCES-$(LIBSMBCLIENT)         += stream/stream_smb.c
 
-SOURCES-$(MACOSX_FINDER)        += osdep/macosx_finder_args.m
 SOURCES-$(MACOSX_BUNDLE)        += osdep/macosx_bundle.m
 SOURCES-$(COCOA)                += video/out/osx_common.m \
                                    video/out/cocoa_common.m \
-                                   osdep/cocoa_events.m
+                                   osdep/macosx_application.m
 SOURCES-$(MNG)                  += demux/demux_mng.c
 SOURCES-$(MPG123)               += audio/decode/ad_mpg123.c
 SOURCES-$(LIBXMP)               += demux/demux_libxmp.c
@@ -74,7 +73,6 @@ SOURCES-$(STREAM_CACHE)         += stream/cache2.c
 
 SOURCES-$(TV)                   += stream/stream_tv.c stream/tv.c \
                                    stream/frequencies.c stream/tvi_dummy.c
-SOURCES-$(TV_BSDBT848)          += stream/tvi_bsdbt848.c
 
 SOURCES-$(TV_V4L2)              += stream/tvi_v4l2.c stream/audio_in.c
 SOURCES-$(VCD)                  += stream/stream_vcd.c
@@ -83,8 +81,6 @@ SOURCES-$(DUMMY_OSD)            += sub/osd_dummy.c
 SOURCES-$(LIBASS_OSD)           += sub/osd_libass.c
 
 SOURCES-$(ALSA)                 += audio/out/ao_alsa.c
-SOURCES-$(APPLE_IR)             += core/input/appleir.c
-SOURCES-$(APPLE_REMOTE)         += core/input/ar.c
 SOURCES-$(CACA)                 += video/out/vo_caca.c
 SOURCES-$(SDL)                  += audio/out/ao_sdl.c
 SOURCES-$(SDL2)                 += video/out/vo_sdl.c
@@ -94,14 +90,19 @@ SOURCES-$(DIRECT3D)             += video/out/vo_direct3d.c \
                                    video/out/w32_common.c
 SOURCES-$(DSOUND)               += audio/out/ao_dsound.c
 SOURCES-$(GL)                   += video/out/gl_common.c video/out/gl_osd.c \
-                                   video/out/vo_opengl.c \
+                                   video/out/vo_opengl.c video/out/gl_lcms.c \
+                                   video/out/gl_video.c \
                                    video/out/vo_opengl_old.c \
                                    video/out/pnm_loader.c
 
 SOURCES-$(ENCODING)             += video/out/vo_lavc.c audio/out/ao_lavc.c \
                                    core/encode_lavc.c
-SOURCES-$(GL_WIN32)             += video/out/w32_common.c
-SOURCES-$(GL_X11)               += video/out/x11_common.c
+
+SOURCES-$(GL_WIN32)             += video/out/w32_common.c video/out/gl_w32.c
+SOURCES-$(GL_X11)               += video/out/x11_common.c video/out/gl_x11.c
+SOURCES-$(GL_COCOA)             += video/out/gl_cocoa.c
+SOURCES-$(GL_WAYLAND)           += video/out/wayland_common.c \
+                                   video/out/gl_wayland.c
 
 SOURCES-$(JACK)                 += audio/out/ao_jack.c
 SOURCES-$(JOYSTICK)             += core/input/joystick.c
@@ -117,8 +118,17 @@ SOURCES-$(VDPAU)                += video/out/vo_vdpau.c
 SOURCES-$(X11)                  += video/out/vo_x11.c video/out/x11_common.c
 SOURCES-$(XV)                   += video/out/vo_xv.c
 
+SOURCES-$(VF_LAVFI)             += video/filter/vf_lavfi.c
+
+ifeq ($(HAVE_AVUTIL_REFCOUNTING),no)
+    SOURCES-yes                 += video/decode/lavc_dr1.c
+endif
 
 SOURCES = talloc.c \
+          audio/audio.c \
+          audio/chmap.c \
+          audio/chmap_sel.c \
+          audio/fmt-conversion.c \
           audio/format.c \
           audio/mixer.c \
           audio/reorder_ch.c \
@@ -133,20 +143,20 @@ SOURCES = talloc.c \
           audio/filter/af_dummy.c \
           audio/filter/af_equalizer.c \
           audio/filter/af_extrastereo.c \
+          audio/filter/af_force.c \
           audio/filter/af_format.c \
           audio/filter/af_hrtf.c \
           audio/filter/af_karaoke.c \
           audio/filter/af_lavcac3enc.c \
-          audio/filter/af_lavcresample.c \
+          audio/filter/af_lavrresample.c \
           audio/filter/af_pan.c \
-          audio/filter/af_resample.c \
           audio/filter/af_scaletempo.c \
           audio/filter/af_sinesuppress.c \
           audio/filter/af_sub.c \
           audio/filter/af_surround.c \
           audio/filter/af_sweep.c \
           audio/filter/af_tools.c \
-          audio/filter/af_volnorm.c \
+          audio/filter/af_drc.c \
           audio/filter/af_volume.c \
           audio/filter/filter.c \
           audio/filter/window.c \
@@ -154,10 +164,11 @@ SOURCES = talloc.c \
           audio/out/ao_null.c \
           audio/out/ao_pcm.c \
           core/asxparser.c \
+          core/av_common.c \
           core/av_log.c \
           core/av_opts.c \
           core/bstr.c \
-          core/codec-cfg.c \
+          core/codecs.c \
           core/command.c \
           core/cpudetect.c \
           core/defaultopts.c \
@@ -184,6 +195,7 @@ SOURCES = talloc.c \
           demux/asfheader.c \
           demux/aviheader.c \
           demux/aviprint.c \
+          demux/codec_tags.c \
           demux/demux.c \
           demux/demux_asf.c \
           demux/demux_avi.c \
@@ -202,7 +214,6 @@ SOURCES = talloc.c \
           demux/ebml.c \
           demux/extension.c \
           demux/mf.c \
-          demux/mp_taglists.c \
           demux/video.c \
           osdep/numcores.c \
           osdep/io.c \
@@ -231,7 +242,6 @@ SOURCES = talloc.c \
           video/mp_image_pool.c \
           video/sws_utils.c \
           video/decode/dec_video.c \
-          video/decode/lavc_dr1.c \
           video/decode/vd.c \
           video/decode/vd_lavc.c \
           video/filter/vf.c \
@@ -346,10 +356,6 @@ mpv$(EXESUF): $(OBJECTS)
 mpv$(EXESUF):
 	$(CC) -o $@ $^ $(EXTRALIBS)
 
-core/codec-cfg.c: core/codecs.conf.h
-core/codecs.conf.h: TOOLS/file2string.pl etc/codecs.conf
-	./$^ >$@
-
 core/input/input.c: core/input/input_conf.h
 core/input/input_conf.h: TOOLS/file2string.pl etc/input.conf
 	./$^ >$@
@@ -372,12 +378,12 @@ demux/ebml.c: demux/ebml_defs.c
 demux/ebml_defs.c: TOOLS/matroska.pl $(MKVLIB_DEPS)
 	./$< --generate-definitions > $@
 
-video/out/vo_opengl.c: video/out/vo_opengl_shaders.h
-video/out/vo_opengl_shaders.h: TOOLS/file2string.pl video/out/vo_opengl_shaders.glsl
+video/out/gl_video.c: video/out/gl_video_shaders.h
+video/out/gl_video_shaders.h: TOOLS/file2string.pl video/out/gl_video_shaders.glsl
 	./$^ >$@
 
 sub/osd_libass.c: sub/osd_font.h
-sub/osd_font.h: TOOLS/file2string.pl sub/osd_font.pfb
+sub/osd_font.h: TOOLS/file2string.pl sub/osd_font.otf
 	./$^ >$@
 
 # ./configure must be rerun if it changed
@@ -445,11 +451,10 @@ clean:
 	-$(RM) $(call ADD_ALL_EXESUFS,mpv)
 	-$(RM) DOCS/man/en/mpv.1
 	-$(RM) version.h
-	-$(RM) core/codecs.conf.h
 	-$(RM) core/input/input_conf.h
 	-$(RM) video/out/vdpau_template.c
 	-$(RM) demux/ebml_types.h demux/ebml_defs.c
-	-$(RM) video/out/vo_opengl_shaders.h
+	-$(RM) video/out/gl_video_shaders.h
 	-$(RM) sub/osd_font.h
 
 distclean: clean
@@ -463,6 +468,9 @@ tags:
 
 osxbundle:
 	@TOOLS/osxbundle.py mpv
+
+osxbundle-skip-deps:
+	@TOOLS/osxbundle.py --skip-deps mpv
 
 -include $(DEP_FILES)
 

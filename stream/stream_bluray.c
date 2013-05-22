@@ -48,14 +48,17 @@
 #define BLURAY_DEFAULT_CHAPTER    0
 #define BLURAY_DEFAULT_TITLE      0
 
+// 90khz ticks
+#define BD_TIMEBASE (90000)
+#define BD_TIME_TO_MP(x) ((x) / (double)(BD_TIMEBASE))
+#define BD_TIME_FROM_MP(x) ((uint64_t)(x * BD_TIMEBASE))
+
 char *bluray_device  = NULL;
 int   bluray_angle   = 0;
-int   bluray_chapter = 0;
 
 struct bluray_priv_s {
     BLURAY *bd;
     int current_angle;
-    int current_chapter;
     int current_title;
 };
 
@@ -129,13 +132,34 @@ static int bluray_stream_control(stream_t *s, int cmd, void *arg)
         return 1;
     }
 
+    case STREAM_CTRL_GET_CHAPTER_TIME: {
+        BLURAY_TITLE_INFO *ti;
+        int chapter = *(double *)arg;
+        double time = MP_NOPTS_VALUE;
+
+        ti = bd_get_title_info(b->bd, b->current_title, b->current_angle);
+        if (!ti)
+            return STREAM_UNSUPPORTED;
+
+        if (chapter >= 0 || chapter < ti->chapter_count) {
+            time = BD_TIME_TO_MP(ti->chapters[chapter].start);
+        }
+        bd_free_title_info(ti);
+
+        if (time != MP_NOPTS_VALUE) {
+            *(double *)arg = time;
+            return STREAM_OK;
+        }
+        return STREAM_ERROR;
+    }
+
     case STREAM_CTRL_GET_CURRENT_TITLE: {
         *((unsigned int *) arg) = b->current_title;
         return 1;
     }
 
     case STREAM_CTRL_GET_CURRENT_CHAPTER: {
-        *((unsigned int *) arg) = b->current_chapter;
+        *((unsigned int *) arg) = bd_get_current_chapter(b->bd);
         return 1;
     }
 
@@ -159,6 +183,31 @@ static int bluray_stream_control(stream_t *s, int cmd, void *arg)
         bd_free_title_info(ti);
 
         return r ? 1 : STREAM_UNSUPPORTED;
+    }
+
+    case STREAM_CTRL_GET_TIME_LENGTH: {
+        BLURAY_TITLE_INFO *ti;
+
+        ti = bd_get_title_info(b->bd, b->current_title, b->current_angle);
+        if (!ti)
+            return STREAM_UNSUPPORTED;
+
+        *((double *) arg) = BD_TIME_TO_MP(ti->duration);
+        return STREAM_OK;
+    }
+
+    case STREAM_CTRL_GET_CURRENT_TIME: {
+        *((double *) arg) = BD_TIME_TO_MP(bd_tell_time(b->bd));
+        return STREAM_OK;
+    }
+
+    case STREAM_CTRL_SEEK_TO_TIME: {
+        double pts = *((double *) arg);
+        bd_seek_time(b->bd, BD_TIME_FROM_MP(pts));
+        // Reset mpv internal stream position.
+        stream_seek(s, bd_tell(b->bd));
+        // API makes it hard to determine seeking success
+        return STREAM_OK;
     }
 
     case STREAM_CTRL_GET_NUM_ANGLES: {
@@ -215,18 +264,25 @@ static int bluray_stream_control(stream_t *s, int cmd, void *arg)
                 si = ti->clips[0].pg_streams;
                 break;
             }
-            while (count-- > 0) {
-                if (si->pid == req->id) {
-                    snprintf(req->name, sizeof(req->name), "%.4s", si->lang);
+            for (int n = 0; n < count; n++) {
+                BLURAY_STREAM_INFO *i = &si[n];
+                if (i->pid == req->id) {
+                    snprintf(req->name, sizeof(req->name), "%.4s", i->lang);
                     bd_free_title_info(ti);
                     return STREAM_OK;
                 }
-                si++;
             }
         }
         bd_free_title_info(ti);
         return STREAM_ERROR;
     }
+    case STREAM_CTRL_GET_START_TIME:
+    {
+        *((double *)arg) = 0;
+        return STREAM_OK;
+    }
+    case STREAM_CTRL_MANAGES_TIMELINE:
+        return STREAM_OK;
 
     default:
         break;
@@ -247,9 +303,8 @@ static int bluray_stream_open(stream_t *s, int mode,
     int title, title_guess, title_count;
     uint64_t title_size;
 
-    unsigned int chapter = 0, angle = 0;
+    unsigned int angle = 0;
     uint64_t max_duration = 0;
-    int64_t chapter_pos = 0;
 
     char *device = NULL;
     int i;
@@ -328,16 +383,6 @@ static int bluray_stream_open(stream_t *s, int mode,
     if (!info)
         goto err_no_info;
 
-    /* Select chapter */
-    chapter = bluray_chapter ? bluray_chapter : BLURAY_DEFAULT_CHAPTER;
-    chapter = FFMIN(chapter, info->chapter_count);
-
-    if (chapter)
-        chapter_pos = bd_chapter_pos(bd, chapter);
-
-    mp_msg(MSGT_IDENTIFY, MSGL_INFO,
-           "ID_BLURAY_CURRENT_CHAPTER=%d\n", chapter + 1);
-
     /* Select angle */
     angle = bluray_angle ? bluray_angle : BLURAY_DEFAULT_ANGLE;
     angle = FFMIN(angle, info->angle_count);
@@ -358,10 +403,8 @@ err_no_info:
     b                  = calloc(1, sizeof(struct bluray_priv_s));
     b->bd              = bd;
     b->current_angle   = angle;
-    b->current_chapter = chapter;
     b->current_title   = title;
 
-    s->start_pos   = chapter_pos;
     s->end_pos     = title_size;
     s->sector_size = BLURAY_SECTOR_SIZE;
     s->flags       = mode | MP_STREAM_SEEK;

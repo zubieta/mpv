@@ -29,6 +29,7 @@
 
 #include "config.h"
 #include "core/options.h"
+#include "core/av_common.h"
 #include "talloc.h"
 #include "core/mp_msg.h"
 
@@ -44,7 +45,7 @@
 #error MP_INPUT_BUFFER_PADDING_SIZE is too small!
 #endif
 
-static void clear_parser(sh_common_t *sh);
+static void clear_parser(sh_audio_t *sh);
 
 // Demuxer list
 extern const struct demuxer_desc demuxer_desc_edl;
@@ -104,6 +105,16 @@ const demuxer_desc_t *const demuxer_list[] = {
     NULL
 };
 
+static void add_stream_chapters(struct demuxer *demuxer);
+
+static int packet_destroy(void *ptr)
+{
+    struct demux_packet *dp = ptr;
+    talloc_free(dp->avpacket);
+    free(dp->allocation);
+    return 0;
+}
+
 static struct demux_packet *create_packet(size_t len)
 {
     if (len > 1000000000) {
@@ -111,18 +122,14 @@ static struct demux_packet *create_packet(size_t len)
                "over 1 GB!\n");
         abort();
     }
-    struct demux_packet *dp = malloc(sizeof(struct demux_packet));
-    dp->len = len;
-    dp->next = NULL;
-    dp->pts = MP_NOPTS_VALUE;
-    dp->duration = -1;
-    dp->stream_pts = MP_NOPTS_VALUE;
-    dp->pos = 0;
-    dp->keyframe = false;
-    dp->refcount = 1;
-    dp->master = NULL;
-    dp->buffer = NULL;
-    dp->avpacket = NULL;
+    struct demux_packet *dp = talloc(NULL, struct demux_packet);
+    talloc_set_destructor(dp, packet_destroy);
+    *dp = (struct demux_packet) {
+        .len = len,
+        .pts = MP_NOPTS_VALUE,
+        .duration = -1,
+        .stream_pts = MP_NOPTS_VALUE,
+    };
     return dp;
 }
 
@@ -134,15 +141,23 @@ struct demux_packet *new_demux_packet(size_t len)
         mp_msg(MSGT_DEMUXER, MSGL_FATAL, "Memory allocation failure!\n");
         abort();
     }
-    memset(dp->buffer + len, 0, 8);
+    memset(dp->buffer + len, 0, MP_INPUT_BUFFER_PADDING_SIZE);
+    dp->allocation = dp->buffer;
     return dp;
 }
 
-// data must already have suitable padding
+// data must already have suitable padding, and does not copy the data
 struct demux_packet *new_demux_packet_fromdata(void *data, size_t len)
 {
     struct demux_packet *dp = create_packet(len);
     dp->buffer = data;
+    return dp;
+}
+
+struct demux_packet *new_demux_packet_from(void *data, size_t len)
+{
+    struct demux_packet *dp = new_demux_packet(len);
+    memcpy(dp->buffer, data, len);
     return dp;
 }
 
@@ -153,44 +168,20 @@ void resize_demux_packet(struct demux_packet *dp, size_t len)
                "over 1 GB!\n");
         abort();
     }
+    assert(dp->allocation);
     dp->buffer = realloc(dp->buffer, len + MP_INPUT_BUFFER_PADDING_SIZE);
     if (!dp->buffer) {
         mp_msg(MSGT_DEMUXER, MSGL_FATAL, "Memory allocation failure!\n");
         abort();
     }
-    memset(dp->buffer + len, 0, 8);
+    memset(dp->buffer + len, 0, MP_INPUT_BUFFER_PADDING_SIZE);
     dp->len = len;
-}
-
-struct demux_packet *clone_demux_packet(struct demux_packet *pack)
-{
-    struct demux_packet *dp = malloc(sizeof(struct demux_packet));
-    while (pack->master)
-        pack = pack->master;  // find the master
-    memcpy(dp, pack, sizeof(struct demux_packet));
-    dp->next = NULL;
-    dp->refcount = 0;
-    dp->master = pack;
-    pack->refcount++;
-    return dp;
+    dp->allocation = dp->buffer;
 }
 
 void free_demux_packet(struct demux_packet *dp)
 {
-    if (dp->master == NULL) {  //dp is a master packet
-        dp->refcount--;
-        if (dp->refcount == 0) {
-            if (dp->avpacket)
-                talloc_free(dp->avpacket);
-            else
-                free(dp->buffer);
-            free(dp);
-        }
-        return;
-    }
-    // dp is a clone:
-    free_demux_packet(dp->master);
-    free(dp);
+    talloc_free(dp);
 }
 
 static void free_demuxer_stream(struct demux_stream *ds)
@@ -210,20 +201,6 @@ static struct demux_stream *new_demuxer_stream(struct demuxer *demuxer,
         .asf_seq = -1,
     };
     return ds;
-}
-
-struct sh_stream *ds_gsh(struct demux_stream *ds)
-{
-    // Ideally ds would have a gsh field, but since all the old demuxers set
-    // ds->sh themselves and we don't want to change them, enjoy this hack.
-    if (!ds->sh)
-        return NULL;
-    switch (ds->stream_type) {
-    case STREAM_VIDEO: return ((struct sh_video *)ds->sh)->gsh;
-    case STREAM_AUDIO: return ((struct sh_audio *)ds->sh)->gsh;
-    case STREAM_SUB: return ((struct sh_sub *)ds->sh)->gsh;
-    }
-    assert(false);
 }
 
 /**
@@ -256,8 +233,8 @@ demuxer_t *new_demuxer(struct MPOpts *opts, stream_t *stream, int type,
     d->seekable = 1;
     d->synced = 0;
     d->filepos = -1;
-    d->audio = new_demuxer_stream(d, STREAM_VIDEO, a_id);
-    d->video = new_demuxer_stream(d, STREAM_AUDIO, v_id);
+    d->audio = new_demuxer_stream(d, STREAM_AUDIO, a_id);
+    d->video = new_demuxer_stream(d, STREAM_VIDEO, v_id);
     d->sub = new_demuxer_stream(d, STREAM_SUB, s_id);
     d->ds[STREAM_VIDEO] = d->video;
     d->ds[STREAM_AUDIO] = d->audio;
@@ -275,32 +252,21 @@ demuxer_t *new_demuxer(struct MPOpts *opts, stream_t *stream, int type,
     return d;
 }
 
-const char *sh_sub_type2str(int type)
+static struct sh_stream *new_sh_stream_id(demuxer_t *demuxer,
+                                          enum stream_type type,
+                                          int stream_index,
+                                          int demuxer_id)
 {
-    switch (type) {
-    case 't': return "text";
-    case 'm': return "movtext";
-    case 'a': return "ass";
-    case 'v': return "vobsub";
-    case 'x': return "xsub";
-    case 'b': return "dvb";
-    case 'd': return "dvb-teletext";
-    case 'p': return "hdmv pgs";
+    if (demuxer->num_streams > MAX_SH_STREAMS || stream_index > MAX_SH_STREAMS) {
+        mp_msg(MSGT_DEMUXER, MSGL_WARN, "Too many streams.");
+        return NULL;
     }
-    return "unknown";
-}
 
-static struct sh_stream *new_sh_stream(demuxer_t *demuxer,
-                                       enum stream_type type,
-                                       int stream_index,
-                                       int tid)
-{
     struct sh_stream *sh = talloc_struct(demuxer, struct sh_stream, {
         .type = type,
         .demuxer = demuxer,
         .index = demuxer->num_streams,
-        .demuxer_id = tid, // may be overwritten by demuxer
-        .tid = tid,
+        .demuxer_id = demuxer_id, // may be overwritten by demuxer
         .stream_index = stream_index,
         .opts = demuxer->opts,
     });
@@ -308,38 +274,51 @@ static struct sh_stream *new_sh_stream(demuxer_t *demuxer,
     switch (sh->type) {
         case STREAM_VIDEO: {
             struct sh_video *sht = talloc_zero(demuxer, struct sh_video);
-            sht->vid = sh->tid;
+            sht->gsh = sh;
+            sht->opts = sh->opts;
             sht->ds = demuxer->video;
             sh->video = sht;
-            sh->common_header = (struct sh_common *) sht;
             demuxer->v_streams[sh->stream_index] = sht;
             break;
         }
         case STREAM_AUDIO: {
             struct sh_audio *sht = talloc_zero(demuxer, struct sh_audio);
-            sht->aid = tid;
+            sht->gsh = sh;
+            sht->opts = sh->opts;
             sht->ds = demuxer->audio;
             sht->samplesize = 2;
             sht->sample_format = AF_FORMAT_S16_NE;
             sh->audio = sht;
-            sh->common_header = (struct sh_common *) sht;
             demuxer->a_streams[sh->stream_index] = sht;
             break;
         }
         case STREAM_SUB: {
             struct sh_sub *sht = talloc_zero(demuxer, struct sh_sub);
-            sht->sid = tid;
+            sht->gsh = sh;
+            sht->opts = sh->opts;
             sht->ds = demuxer->sub;
             sh->sub = sht;
-            sh->common_header = (struct sh_common *) sht;
             demuxer->s_streams[sh->stream_index] = sht;
             break;
         }
         default: assert(false);
     }
-    sh->common_header->opts = sh->opts;
-    sh->common_header->gsh = sh;
     return sh;
+}
+
+// This is what "modern" demuxers are supposed to use.
+struct sh_stream *new_sh_stream(demuxer_t *demuxer, enum stream_type type)
+{
+    int num = 0;
+    for (int n = 0; n < demuxer->num_streams; n++) {
+        if (demuxer->streams[n]->type == type)
+            num++;
+    }
+    return new_sh_stream_id(demuxer, type, demuxer->num_streams, num);
+}
+
+static void free_sh_stream(struct sh_stream *sh)
+{
 }
 
 sh_sub_t *new_sh_sub_sid(demuxer_t *demuxer, int id, int sid)
@@ -353,7 +332,7 @@ sh_sub_t *new_sh_sub_sid(demuxer_t *demuxer, int id, int sid)
     if (demuxer->s_streams[id])
         mp_msg(MSGT_DEMUXER, MSGL_WARN, "Sub stream %i redefined\n", id);
     else {
-        new_sh_stream(demuxer, STREAM_SUB, id, sid);
+        new_sh_stream_id(demuxer, STREAM_SUB, id, sid);
         mp_msg(MSGT_IDENTIFY, MSGL_INFO, "ID_SUBTITLE_ID=%d\n", sid);
     }
     return demuxer->s_streams[id];
@@ -364,7 +343,7 @@ struct sh_sub *new_sh_sub_sid_lang(struct demuxer *demuxer, int id, int sid,
 {
     struct sh_sub *sh = new_sh_sub_sid(demuxer, id, sid);
     if (lang && lang[0] && strcmp(lang, "und")) {
-        sh->lang = talloc_strdup(sh, lang);
+        sh->gsh->lang = talloc_strdup(sh, lang);
         mp_msg(MSGT_IDENTIFY, MSGL_INFO, "ID_SID_%d_LANG=%s\n", sid, lang);
     }
     return sh;
@@ -374,8 +353,7 @@ static void free_sh_sub(sh_sub_t *sh)
 {
     mp_msg(MSGT_DEMUXER, MSGL_DBG2, "DEMUXER: freeing sh_sub at %p\n", sh);
     free(sh->extradata);
-    clear_parser((sh_common_t *)sh);
-    talloc_free(sh);
+    free_sh_stream(sh->gsh);
 }
 
 sh_audio_t *new_sh_audio_aid(demuxer_t *demuxer, int id, int aid)
@@ -390,7 +368,7 @@ sh_audio_t *new_sh_audio_aid(demuxer_t *demuxer, int id, int aid)
         mp_tmsg(MSGT_DEMUXER, MSGL_WARN, "WARNING: Audio stream header %d redefined.\n", id);
     } else {
         mp_tmsg(MSGT_DEMUXER, MSGL_V, "==> Found audio stream: %d\n", id);
-        new_sh_stream(demuxer, STREAM_AUDIO, id, aid);
+        new_sh_stream_id(demuxer, STREAM_AUDIO, id, aid);
         mp_msg(MSGT_IDENTIFY, MSGL_INFO, "ID_AUDIO_ID=%d\n", aid);
     }
     return demuxer->a_streams[id];
@@ -403,8 +381,8 @@ static void free_sh_audio(demuxer_t *demuxer, int id)
     mp_msg(MSGT_DEMUXER, MSGL_DBG2, "DEMUXER: freeing sh_audio at %p\n", sh);
     free(sh->wf);
     free(sh->codecdata);
-    clear_parser((sh_common_t *)sh);
-    talloc_free(sh);
+    clear_parser(sh);
+    free_sh_stream(sh->gsh);
 }
 
 sh_video_t *new_sh_video_vid(demuxer_t *demuxer, int id, int vid)
@@ -419,7 +397,7 @@ sh_video_t *new_sh_video_vid(demuxer_t *demuxer, int id, int vid)
         mp_tmsg(MSGT_DEMUXER, MSGL_WARN, "WARNING: Video stream header %d redefined.\n", id);
     else {
         mp_tmsg(MSGT_DEMUXER, MSGL_V, "==> Found video stream: %d\n", id);
-        new_sh_stream(demuxer, STREAM_VIDEO, id, vid);
+        new_sh_stream_id(demuxer, STREAM_VIDEO, id, vid);
         mp_msg(MSGT_IDENTIFY, MSGL_INFO, "ID_VIDEO_ID=%d\n", vid);
     }
     return demuxer->v_streams[id];
@@ -429,8 +407,7 @@ static void free_sh_video(sh_video_t *sh)
 {
     mp_msg(MSGT_DEMUXER, MSGL_DBG2, "DEMUXER: freeing sh_video at %p\n", sh);
     free(sh->bih);
-    clear_parser((sh_common_t *)sh);
-    talloc_free(sh);
+    free_sh_stream(sh->gsh);
 }
 
 void free_demuxer(demuxer_t *demuxer)
@@ -458,6 +435,15 @@ void free_demuxer(demuxer_t *demuxer)
     talloc_free(demuxer);
 }
 
+void demuxer_add_packet(demuxer_t *demuxer, struct sh_stream *stream,
+                        demux_packet_t *dp)
+{
+    if (!demuxer_stream_is_selected(demuxer, stream)) {
+        free_demux_packet(dp);
+    } else {
+        ds_add_packet(demuxer->ds[stream->type], dp);
+    }
+}
 
 void ds_add_packet(demux_stream_t *ds, demux_packet_t *dp)
 {
@@ -489,67 +475,32 @@ void ds_add_packet(demux_stream_t *ds, demux_packet_t *dp)
            ds->demuxer->video->packs);
 }
 
-static void allocate_parser(AVCodecContext **avctx, AVCodecParserContext **parser, unsigned format)
+static void allocate_parser(AVCodecContext **avctx, AVCodecParserContext **parser, const char *format)
 {
-    enum CodecID codec_id = CODEC_ID_NONE;
+    enum AVCodecID codec_id = mp_codec_to_av_codec_id(format);
 
-    switch (format) {
-    case MKTAG('M', 'P', '4', 'L'):
-        codec_id = CODEC_ID_AAC_LATM;
-        break;
-    case 0x2000:
-    case 0x332D6361:
-    case 0x332D4341:
-    case 0x20736D:
-    case MKTAG('s', 'a', 'c', '3'):
-        codec_id = CODEC_ID_AC3;
-        break;
-    case MKTAG('d', 'n', 'e', 't'):
-        // DNET/byte-swapped AC-3 - there is no parser for that yet
-        //codec_id = CODEC_ID_DNET;
-        break;
-    case MKTAG('E', 'A', 'C', '3'):
-        codec_id = CODEC_ID_EAC3;
-        break;
-    case 0x2001:
-    case 0x86:
-        codec_id = CODEC_ID_DTS;
-        break;
-    case MKTAG('f', 'L', 'a', 'C'):
-        codec_id = CODEC_ID_FLAC;
-        break;
-    case MKTAG('M', 'L', 'P', ' '):
-        codec_id = CODEC_ID_MLP;
-        break;
-    case 0x55:
-    case 0x5500736d:
-    case 0x55005354:
-    case MKTAG('.', 'm', 'p', '3'):
-    case MKTAG('M', 'P', '3', ' '):
-    case MKTAG('L', 'A', 'M', 'E'):
-        codec_id = CODEC_ID_MP3;
-        break;
-    case 0x50:
-    case 0x5000736d:
-    case MKTAG('.', 'm', 'p', '2'):
-    case MKTAG('.', 'm', 'p', '1'):
-        codec_id = CODEC_ID_MP2;
-        break;
-    case MKTAG('T', 'R', 'H', 'D'):
-        codec_id = CODEC_ID_TRUEHD;
-        break;
-    }
-    if (codec_id != CODEC_ID_NONE) {
+    switch (codec_id) {
+    case AV_CODEC_ID_AAC_LATM:
+    case AV_CODEC_ID_AC3:
+    case AV_CODEC_ID_EAC3:
+    case AV_CODEC_ID_DTS:
+    case AV_CODEC_ID_FLAC:
+    case AV_CODEC_ID_MLP:
+    case AV_CODEC_ID_MP3:
+    case AV_CODEC_ID_MP2:
+    case AV_CODEC_ID_TRUEHD:
         *avctx = avcodec_alloc_context3(NULL);
         if (!*avctx)
             return;
         *parser = av_parser_init(codec_id);
         if (!*parser)
             av_freep(avctx);
+        break;
+    default: ;
     }
 }
 
-static void get_parser(sh_common_t *sh, AVCodecContext **avctx, AVCodecParserContext **parser)
+static void get_parser(sh_audio_t *sh, AVCodecContext **avctx, AVCodecParserContext **parser)
 {
     *avctx  = NULL;
     *parser = NULL;
@@ -562,7 +513,7 @@ static void get_parser(sh_common_t *sh, AVCodecContext **avctx, AVCodecParserCon
     if (*parser)
         return;
 
-    allocate_parser(avctx, parser, sh->format);
+    allocate_parser(avctx, parser, sh->gsh->codec);
     sh->avctx  = *avctx;
     sh->parser = *parser;
 }
@@ -577,7 +528,7 @@ int ds_parse(demux_stream_t *ds, uint8_t **buffer, int *len, double pts, int64_t
     return av_parser_parse2(parser, avctx, buffer, len, *buffer, *len, pts, pts, pos);
 }
 
-static void clear_parser(sh_common_t *sh)
+static void clear_parser(sh_audio_t *sh)
 {
     av_parser_close(sh->parser);
     sh->parser = NULL;
@@ -604,6 +555,32 @@ void ds_read_packet(demux_stream_t *ds, stream_t *stream, int len,
     ds_add_packet(ds, dp);
 }
 
+static bool demux_check_queue_full(demuxer_t *demux)
+{
+    int apacks = demux->audio ? demux->audio->packs : 0;
+    int abytes = demux->audio ? demux->audio->bytes : 0;
+    int vpacks = demux->video ? demux->video->packs : 0;
+    int vbytes = demux->video ? demux->video->bytes : 0;
+
+    if (apacks < MAX_PACKS && abytes < MAX_PACK_BYTES &&
+        vpacks < MAX_PACKS && vbytes < MAX_PACK_BYTES)
+        return false;
+
+    if (!demux->warned_queue_overflow) {
+        mp_tmsg(MSGT_DEMUXER, MSGL_ERR, "\nToo many packets in the demuxer "
+                "packet queue (video: %d packets in %d bytes, audio: %d "
+                "packets in %d bytes).\n", vpacks, vbytes, apacks, abytes);
+        mp_tmsg(MSGT_DEMUXER, MSGL_HINT, "Maybe you are playing a non-"
+                "interleaved stream/file or the codec failed?\nFor AVI files, "
+                "try to force non-interleaved mode with the "
+                "--demuxer=avi --avi-ni options.\n");
+    }
+
+    demux->warned_queue_overflow = true;
+
+    return true;
+}
+
 // return value:
 //     0 = EOF or no stream found or invalid type
 //     1 = successfully read a packet
@@ -628,14 +605,9 @@ int ds_fill_buffer(demux_stream_t *ds)
            ds == demux->sub   ? "d_sub"   : "unknown");
     while (1) {
         int apacks = demux->audio ? demux->audio->packs : 0;
-        int abytes = demux->audio ? demux->audio->bytes : 0;
         int vpacks = demux->video ? demux->video->packs : 0;
-        int vbytes = demux->video ? demux->video->bytes : 0;
         if (ds->packs) {
             demux_packet_t *p = ds->first;
-            // obviously not yet EOF after all
-            ds->eof = 0;
-            ds->fill_count = 0;
             // copy useful data:
             ds->buffer = p->buffer;
             ds->buffer_pos = 0;
@@ -666,6 +638,7 @@ int ds_fill_buffer(demux_stream_t *ds)
              * despite the eof flag then it's better to clear it to avoid
              * weird behavior. */
             ds->eof = 0;
+            ds->fill_count = 0;
             return 1;
         }
         // avoid buffering too far ahead in e.g. badly interleaved files
@@ -676,39 +649,24 @@ int ds_fill_buffer(demux_stream_t *ds)
         // with more than 1s precision.
         if (ds->fill_count > 80)
             break;
-        // avoid printing the "too many ..." message over and over
-        if (ds->eof)
+
+        if (demux_check_queue_full(demux))
             break;
 
-#define MaybeNI _("Maybe you are playing a non-interleaved stream/file or the codec failed?\n" \
-                "For AVI files, try to force non-interleaved mode with the --demuxer=avi --avi-ni options.\n")
-
-        if (apacks >= MAX_PACKS || abytes >= MAX_PACK_BYTES) {
-            mp_tmsg(MSGT_DEMUXER, MSGL_ERR, "\nToo many audio packets in the buffer: (%d in %d bytes).\n",
-                   apacks, abytes);
-            mp_tmsg(MSGT_DEMUXER, MSGL_HINT, MaybeNI);
-            break;
-        }
-        if (vpacks >= MAX_PACKS || vbytes >= MAX_PACK_BYTES) {
-            mp_tmsg(MSGT_DEMUXER, MSGL_ERR, "\nToo many video packets in the buffer: (%d in %d bytes).\n",
-                   vpacks, vbytes);
-            mp_tmsg(MSGT_DEMUXER, MSGL_HINT, MaybeNI);
-            break;
-        }
         if (!demux_fill_buffer(demux, ds)) {
             mp_dbg(MSGT_DEMUXER, MSGL_DBG2,
                    "ds_fill_buffer()->demux_fill_buffer() failed\n");
             break; // EOF
         }
-        if (demux->audio)
-            ds->fill_count += demux->audio->packs - apacks;
-        if (demux->video && demux->video->packs > vpacks &&
-            // Empty packets or "skip" packets in e.g. AVI can cause issues.
-            demux->video->bytes > vbytes + 100 &&
-            // when video needs parsing we will have lots of video packets
-            // in-between audio packets, so ignore them in that case.
-            demux->video->sh && !((sh_video_t *)demux->video->sh)->needs_parsing)
-            ds->fill_count++;
+
+        struct sh_video *sh_video = demux->video->sh;
+
+        if (sh_video && sh_video->gsh->attached_picture) {
+            if (demux->audio)
+                ds->fill_count += demux->audio->packs - apacks;
+            if (demux->video && demux->video->packs > vpacks)
+                ds->fill_count++;
+        }
     }
     ds->buffer_pos = ds->buffer_size = 0;
     ds->buffer = NULL;
@@ -851,10 +809,16 @@ int ds_get_packet_sub(demux_stream_t *ds, unsigned char **start)
 
 struct demux_packet *ds_get_packet2(struct demux_stream *ds, bool repeat_last)
 {
-    // This shouldn't get used together with partial reads
-    assert(ds->buffer_pos == 0 || ds->buffer_pos >= ds->buffer_size);
     if (!repeat_last)
         ds_fill_buffer(ds);
+    // This shouldn't get used together with partial reads
+    // However, some old demuxers return parsed packets with an offset in
+    // -correct-pts mode (at least mpegts).
+    // Not all old demuxers will actually work.
+    if (ds->buffer_pos < ds->buffer_size) {
+        ds->current->buffer += ds->buffer_pos;
+        ds->buffer_size -= ds->buffer_pos;
+    }
     ds->buffer_pos = ds->buffer_size;
     return ds->current;
 }
@@ -865,20 +829,8 @@ double ds_get_next_pts(demux_stream_t *ds)
     // if we have not read from the "current" packet, consider it
     // as the next, otherwise we never get the pts for the first packet.
     while (!ds->first && (!ds->current || ds->buffer_pos)) {
-        if (demux->audio->packs >= MAX_PACKS
-            || demux->audio->bytes >= MAX_PACK_BYTES) {
-            mp_tmsg(MSGT_DEMUXER, MSGL_ERR, "\nToo many audio packets in the buffer: (%d in %d bytes).\n",
-                   demux->audio->packs, demux->audio->bytes);
-            mp_tmsg(MSGT_DEMUXER, MSGL_HINT, MaybeNI);
+        if (demux_check_queue_full(demux))
             return MP_NOPTS_VALUE;
-        }
-        if (demux->video->packs >= MAX_PACKS
-            || demux->video->bytes >= MAX_PACK_BYTES) {
-            mp_tmsg(MSGT_DEMUXER, MSGL_ERR, "\nToo many video packets in the buffer: (%d in %d bytes).\n",
-                   demux->video->packs, demux->video->bytes);
-            mp_tmsg(MSGT_DEMUXER, MSGL_HINT, MaybeNI);
-            return MP_NOPTS_VALUE;
-        }
         if (!demux_fill_buffer(demux, ds))
             return MP_NOPTS_VALUE;
     }
@@ -983,6 +935,14 @@ static struct demuxer *open_given_type(struct MPOpts *opts,
             opts->correct_pts =
                 demux_control(demuxer, DEMUXER_CTRL_CORRECT_PTS,
                             NULL) == DEMUXER_CTRL_OK;
+        if (stream_manages_timeline(demuxer->stream)) {
+            // Incorrect, but fixes some behavior with DVD/BD
+            demuxer->ts_resets_possible = false;
+            // Doesn't work, because stream_pts is a "guess".
+            demuxer->accurate_seek = false;
+        }
+        add_stream_chapters(demuxer);
+        demuxer_sort_chapters(demuxer);
         return demuxer;
     } else {
         // demux_mov can return playlist instead of mov
@@ -1032,7 +992,7 @@ struct demuxer *demux_open_withparams(struct MPOpts *opts,
     // format, instead of reyling on libav to auto-detect the stream's format
     // correctly.
     switch (file_format) {
-    //case DEMUXER_TYPE_MPEG_PS:
+    case DEMUXER_TYPE_MPEG_PS:
     //case DEMUXER_TYPE_MPEG_TS:
     case DEMUXER_TYPE_Y4M:
     case DEMUXER_TYPE_NSV:
@@ -1124,13 +1084,14 @@ int demux_seek(demuxer_t *demuxer, float rel_seek_secs, float audio_delay,
     demuxer->video->eof = 0;
     demuxer->audio->eof = 0;
     demuxer->sub->eof = 0;
+    demuxer->warned_queue_overflow = false;
 
     /* HACK: assume any demuxer used with these streams can cope with
      * the stream layer suddenly seeking to a different position under it
      * (nothing actually implements DEMUXER_CTRL_RESYNC now).
      */
     struct stream *stream = demuxer->stream;
-    if (stream->type == STREAMTYPE_DVD) {
+    if (stream_manages_timeline(stream)) {
         double pts;
 
         if (flags & SEEK_ABSOLUTE)
@@ -1257,7 +1218,11 @@ void demuxer_switch_track(struct demuxer *demuxer, enum stream_type type,
                           struct sh_stream *stream)
 {
     assert(!stream || stream->type == type);
-    int index = stream ? stream->tid : -2;
+
+    int old_id = demuxer->ds[type]->id;
+
+    // legacy
+    int index = stream ? stream->stream_index : -2;
     if (type == STREAM_AUDIO) {
         if (demux_control(demuxer, DEMUXER_CTRL_SWITCH_AUDIO, &index)
                 == DEMUXER_CTRL_NOTIMPL)
@@ -1267,11 +1232,11 @@ void demuxer_switch_track(struct demuxer *demuxer, enum stream_type type,
                 == DEMUXER_CTRL_NOTIMPL)
             demuxer->video->id = index;
     } else if (type == STREAM_SUB) {
-        int index2 = stream ? stream->stream_index : -2;
-        if (demuxer->ds[type]->id != index2)
-            ds_free_packs(demuxer->ds[type]);
-        demuxer->ds[type]->id = index2;
+        demuxer->ds[type]->id = index;
+    } else {
+        abort();
     }
+
     int new_id = demuxer->ds[type]->id;
     void *new = NULL;
     if (new_id >= 0) {
@@ -1282,6 +1247,16 @@ void demuxer_switch_track(struct demuxer *demuxer, enum stream_type type,
         }
     }
     demuxer->ds[type]->sh = new;
+
+    if (old_id != new_id) {
+        ds_free_packs(demuxer->ds[type]);
+        demux_control(demuxer, DEMUXER_CTRL_SWITCHED_TRACKS, NULL);
+    }
+}
+
+bool demuxer_stream_is_selected(struct demuxer *d, struct sh_stream *stream)
+{
+    return stream && d->ds[stream->type]->id == stream->stream_index;
 }
 
 int demuxer_add_attachment(demuxer_t *demuxer, struct bstr name,
@@ -1312,10 +1287,10 @@ static int chapter_compare(const void *p1, const void *p2)
         return 1;
     else if (c1->start < c2->start)
         return -1;
-    return 0;
+    return c1->original_index > c2->original_index ? 1 :-1; // never equal
 }
 
-static void demuxer_sort_chapters(demuxer_t *demuxer)
+void demuxer_sort_chapters(demuxer_t *demuxer)
 {
     qsort(demuxer->chapters, demuxer->num_chapters,
           sizeof(struct demux_chapter), chapter_compare);
@@ -1324,25 +1299,28 @@ static void demuxer_sort_chapters(demuxer_t *demuxer)
 int demuxer_add_chapter(demuxer_t *demuxer, struct bstr name,
                         uint64_t start, uint64_t end)
 {
-    if (!(demuxer->num_chapters % 32))
-        demuxer->chapters = talloc_realloc(demuxer, demuxer->chapters,
-                                           struct demux_chapter,
-                                           demuxer->num_chapters + 32);
-
-    demuxer->chapters[demuxer->num_chapters].start = start;
-    demuxer->chapters[demuxer->num_chapters].end = end;
-    demuxer->chapters[demuxer->num_chapters].name = name.len ?
-        talloc_strndup(demuxer->chapters, name.start, name.len) :
-        talloc_strdup(demuxer->chapters, mp_gtext("unknown"));
-
-    demuxer->num_chapters++;
-
-    if (demuxer->num_chapters > 1
-        && demuxer->chapters[demuxer->num_chapters - 2].start
-           < demuxer->chapters[demuxer->num_chapters - 1].start)
-            demuxer_sort_chapters(demuxer);
-
+    struct demux_chapter new = {
+        .original_index = demuxer->num_chapters,
+        .start = start,
+        .end = end,
+        .name = name.len ? bstrdup0(demuxer, name) : NULL,
+    };
+    MP_TARRAY_APPEND(demuxer, demuxer->chapters, demuxer->num_chapters, new);
     return 0;
+}
+
+static void add_stream_chapters(struct demuxer *demuxer)
+{
+    if (demuxer->num_chapters)
+        return;
+    int num_chapters = demuxer_chapter_count(demuxer);
+    for (int n = 0; n < num_chapters; n++) {
+        double p = n;
+        if (stream_control(demuxer->stream, STREAM_CTRL_GET_CHAPTER_TIME, &p)
+                != STREAM_OK)
+            return;
+        demuxer_add_chapter(demuxer, bstr0(""), p * 1e9, 0);
+    }
 }
 
 /**
@@ -1356,22 +1334,22 @@ int demuxer_add_chapter(demuxer_t *demuxer, struct bstr name,
 
 int demuxer_seek_chapter(demuxer_t *demuxer, int chapter, double *seek_pts)
 {
-    int ris;
+    int ris = STREAM_UNSUPPORTED;
 
-    if (!demuxer->num_chapters || !demuxer->chapters) {
-        demux_flush(demuxer);
-
+    if (demuxer->num_chapters == 0)
         ris = stream_control(demuxer->stream, STREAM_CTRL_SEEK_TO_CHAPTER,
                              &chapter);
-        if (ris != STREAM_UNSUPPORTED)
-            demux_control(demuxer, DEMUXER_CTRL_RESYNC, NULL);
+
+    if (ris != STREAM_UNSUPPORTED) {
+        demux_flush(demuxer);
+        demux_control(demuxer, DEMUXER_CTRL_RESYNC, NULL);
 
         // exit status may be ok, but main() doesn't have to seek itself
         // (because e.g. dvds depend on sectors, not on pts)
         *seek_pts = -1.0;
 
-        return ris != STREAM_UNSUPPORTED ? chapter : -1;
-    } else {  // chapters structure is set in the demuxer
+        return chapter;
+    } else {
         if (chapter >= demuxer->num_chapters)
             return -1;
         if (chapter < 0)
@@ -1410,12 +1388,10 @@ char *demuxer_chapter_name(demuxer_t *demuxer, int chapter)
     return NULL;
 }
 
-float demuxer_chapter_time(demuxer_t *demuxer, int chapter, float *end)
+double demuxer_chapter_time(demuxer_t *demuxer, int chapter)
 {
     if (demuxer->num_chapters && demuxer->chapters && chapter >= 0
         && chapter < demuxer->num_chapters) {
-        if (end)
-            *end = demuxer->chapters[chapter].end / 1e9;
         return demuxer->chapters[chapter].start / 1e9;
     }
     return -1.0;
@@ -1431,6 +1407,27 @@ int demuxer_chapter_count(demuxer_t *demuxer)
         return num_chapters;
     } else
         return demuxer->num_chapters;
+}
+
+double demuxer_get_time_length(struct demuxer *demuxer)
+{
+    double len;
+    if (stream_control(demuxer->stream, STREAM_CTRL_GET_TIME_LENGTH, &len) > 0)
+        return len;
+    // <= 0 means DEMUXER_CTRL_NOTIMPL or DEMUXER_CTRL_DONTKNOW
+    if (demux_control(demuxer, DEMUXER_CTRL_GET_TIME_LENGTH, &len) > 0)
+        return len;
+    return -1;
+}
+
+double demuxer_get_start_time(struct demuxer *demuxer)
+{
+    double time;
+    if (stream_control(demuxer->stream, STREAM_CTRL_GET_START_TIME, &time) > 0)
+        return time;
+    if (demux_control(demuxer, DEMUXER_CTRL_GET_START_TIME, &time) > 0)
+        return time;
+    return 0;
 }
 
 int demuxer_angles_count(demuxer_t *demuxer)

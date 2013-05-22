@@ -69,6 +69,7 @@ extern const vf_info_t vf_info_sub;
 extern const vf_info_t vf_info_yadif;
 extern const vf_info_t vf_info_stereo3d;
 extern const vf_info_t vf_info_dlopen;
+extern const vf_info_t vf_info_lavfi;
 
 // list of available filters:
 static const vf_info_t *const filter_list[] = {
@@ -84,6 +85,9 @@ static const vf_info_t *const filter_list[] = {
 
 #ifdef CONFIG_LIBPOSTPROC
     &vf_info_pp,
+#endif
+#ifdef CONFIG_VF_LAVFI
+    &vf_info_lavfi,
 #endif
 
     &vf_info_screenshot,
@@ -463,10 +467,7 @@ int vf_next_control(struct vf_instance *vf, int request, void *data)
 
 int vf_next_query_format(struct vf_instance *vf, unsigned int fmt)
 {
-    int flags = vf->next->query_format(vf->next, fmt);
-    if (flags)
-        flags |= vf->default_caps;
-    return flags;
+    return vf->next->query_format(vf->next, fmt);
 }
 
 //============================================================================
@@ -486,11 +487,24 @@ vf_instance_t *append_filters(vf_instance_t *last,
             //printf("Open filter %s\n",vf_settings[i].name);
             vf = vf_open_filter(opts, last, vf_settings[i].name,
                                 vf_settings[i].attribs);
-            if (vf)
+            if (vf) {
+                if (vf_settings[i].label)
+                    vf->label = talloc_strdup(vf, vf_settings[i].label);
                 last = vf;
+            }
         }
     }
     return last;
+}
+
+vf_instance_t *vf_find_by_label(vf_instance_t *chain, const char *label)
+{
+    while (chain) {
+        if (chain->label && label && strcmp(chain->label, label) == 0)
+            return chain;
+        chain = chain->next;
+    }
+    return NULL;
 }
 
 //============================================================================
@@ -500,6 +514,9 @@ void vf_uninit_filter(vf_instance_t *vf)
     if (vf->uninit)
         vf->uninit(vf);
     vf_forget_frames(vf);
+    const m_struct_t *st = vf->info->opts;
+    if (st)
+        m_struct_free(st, vf->priv);
     talloc_free(vf);
 }
 

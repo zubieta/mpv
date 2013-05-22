@@ -22,17 +22,16 @@
 #include "demux/stheader.h"
 
 struct osd_state;
+struct mp_decoder_list;
 
-// dec_video.c:
-void vfm_help(void);
+struct mp_decoder_list *mp_video_decoder_list(void);
 
-int init_best_video_codec(sh_video_t *sh_video, char** video_codec_list, char** video_fm_list);
+int init_best_video_codec(sh_video_t *sh_video, char* video_decoders);
 void uninit_video(sh_video_t *sh_video);
 
 struct demux_packet;
 void *decode_video(sh_video_t *sh_video, struct demux_packet *packet,
-                   unsigned char *start, int in_size, int drop_frame,
-                   double pts);
+                   int drop_frame, double pts);
 
 int get_video_quality_max(sh_video_t *sh_video);
 
@@ -42,7 +41,7 @@ struct mp_csp_details;
 void get_detected_video_colorspace(struct sh_video *sh, struct mp_csp_details *csp);
 void set_video_colorspace(struct sh_video *sh);
 void resync_video_stream(sh_video_t *sh_video);
-void video_reset_aspect(struct sh_video *sh_video);
+void video_reinit_vo(struct sh_video *sh_video);
 int get_current_video_decoder_lag(sh_video_t *sh_video);
 
 extern int divx_quality;

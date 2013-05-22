@@ -129,8 +129,13 @@ struct osd_state {
 
     bool want_redraw;
 
-    char *osd_text;             // OSDTYPE_OSD
-    int progbar_type, progbar_value; // OSDTYPE_PROGBAR
+    // OSDTYPE_OSD
+    char *osd_text;
+    // OSDTYPE_PROGBAR
+    int progbar_type;      // <0: disabled, 1-255: symbol, else: no symbol
+    float progbar_value;   // range 0.0-1.0
+    float *progbar_stops;  // used for chapter indicators (0.0-1.0 each)
+    int progbar_num_stops;
 
     int switch_sub_id;
 
@@ -187,13 +192,10 @@ struct osd_style_opts {
     float spacing;
     int margin_x;
     int margin_y;
+    float blur;
 };
 
 extern const struct m_sub_options osd_style_conf;
-
-/* now in textform */
-extern char * const sub_osd_names[];
-extern char * const sub_osd_names_short[];
 
 extern char *sub_cp;
 extern int sub_pos;
@@ -205,7 +207,7 @@ extern float sub_fps;
 struct osd_state *osd_create(struct MPOpts *opts, struct ass_library *asslib);
 void osd_set_text(struct osd_state *osd, const char *text);
 void vo_osd_changed(int new_value);
-void osd_subs_changed(struct osd_state *osd);
+void osd_changed_all(struct osd_state *osd);
 void osd_free(struct osd_state *osd);
 
 enum mp_osd_draw_flags {

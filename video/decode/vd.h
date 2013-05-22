@@ -20,23 +20,21 @@
 #define MPLAYER_VD_H
 
 #include "video/mp_image.h"
-#include "core/mpc_info.h"
 #include "demux/stheader.h"
 
-typedef struct mp_codec_info vd_info_t;
-
 struct demux_packet;
+struct mp_decoder_list;
 
 /* interface of video decoder drivers */
 typedef struct vd_functions
 {
-    const vd_info_t *info;
-    int (*init)(sh_video_t *sh);
+    const char *name;
+    void (*add_decoders)(struct mp_decoder_list *list);
+    int (*init)(sh_video_t *sh, const char *decoder);
     void (*uninit)(sh_video_t *sh);
     int (*control)(sh_video_t *sh, int cmd, void *arg);
     struct mp_image *(*decode)(struct sh_video *sh, struct demux_packet *pkt,
-                               void *data, int len, int flags,
-                               double *reordered_pts);
+                               int flags, double *reordered_pts);
 } vd_functions_t;
 
 // NULL terminated array of all drivers
@@ -44,7 +42,7 @@ extern const vd_functions_t *const mpcodecs_vd_drivers[];
 
 #define VDCTRL_RESYNC_STREAM 8 // reset decode state after seeking
 #define VDCTRL_QUERY_UNSEEN_FRAMES 9 // current decoder lag
-#define VDCTRL_RESET_ASPECT 10 // reinit filter/VO chain for new aspect ratio
+#define VDCTRL_REINIT_VO 10 // reinit filter/VO chain
 
 int mpcodecs_config_vo(sh_video_t *sh, int w, int h, unsigned int outfmt);
 

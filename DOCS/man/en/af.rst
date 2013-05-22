@@ -29,55 +29,32 @@ filter list.
 
 Available filters are:
 
-resample[=srate[:sloppy[:type]]]
-    Changes the sample rate of the audio stream. Can be used if you have a
-    fixed frequency sound card or if you are stuck with an old sound card that
-    is only capable of max 44.1kHz. This filter is automatically enabled if
-    necessary. It only supports 16-bit integer and float in native-endian
-    format as input.
+lavrresample[=option1:option2:...]
+    This filter uses libavresample (or libswresample, depending on the build)
+    to change sample rate, sample format, or channel layout of the audio stream.
+    This filter is automatically enabled if the audio output doesn't support
+    the audio configuration of the file being played.
 
-    <srate>
-        output sample frequency in Hz. The valid range for this parameter is
-        8000 to 192000. If the input and output sample frequency are the same
-        or if this parameter is omitted the filter is automatically unloaded.
-        A high sample frequency normally improves the audio quality,
-        especially when used in combination with other filters.
-    <sloppy>
-        Allow (1) or disallow (0) the output frequency to differ slightly from
-        the frequency given by <srate> (default: 1). Can be used if the
-        startup of the playback is extremely slow.
-    <type>
-        Select which resampling method to use.
+    It supports only the following sample formats: u8, s16ne, s32ne, floatne.
 
-        :0: linear interpolation (fast, poor quality especially when
-            upsampling)
-        :1: polyphase filterbank and integer processing
-        :2: polyphase filterbank and floating point processing
-            (slow, best quality)
-
-    *EXAMPLE*:
-
-    ``mpv --af=resample=44100:0:0``
-        would set the output frequency of the resample filter to 44100Hz using
-        exact output frequency scaling and linear interpolation.
-
-lavcresample[=srate[:length[:linear[:count[:cutoff]]]]]
-    Changes the sample rate of the audio stream to an integer <srate> in Hz.
-    It only supports the 16-bit native-endian format.
-
-    <srate>
+    srate=<srate>
         the output sample rate
-    <length>
+    length=<length>
         length of the filter with respect to the lower sampling rate (default:
         16)
-    <linear>
-        if 1 then filters will be linearly interpolated between polyphase
-        entries
-    <count>
+    phase_shift=<count>
         log2 of the number of polyphase entries (..., 10->1024, 11->2048,
         12->4096, ...) (default: 10->1024)
-    <cutoff>
+    cutoff=<cutoff>
         cutoff frequency (0.0-1.0), default set depending upon filter length
+    linear
+        if set then filters will be linearly interpolated between polyphase
+        entries (default: no)
+    no-detach
+        don't detach if input and output audio format/rate/channels are the
+        same. You should add this option if you specify additional parameters,
+        as automatically inserted lavrresample instances will use the
+        default settings.
 
 lavcac3enc[=tospdif[:bitrate[:minchn]]]
     Encode multi-channel audio to AC-3 at runtime using libavcodec. Supports
@@ -233,6 +210,34 @@ channels=nch[:nr:from1:to1:from2:to2:from3:to3:...]
         Would change the number of channels to 6 and set up 4 routes that copy
         channel 0 to channels 0 to 3. Channel 4 and 5 will contain silence.
 
+force=in-format:in-srate:in-channels:out-format:out-srate:out-channels
+    Force a specific audio format/configuration without actually changing the
+    audio data. Keep in mind that the filter system might auto-insert actual
+    conversion filters before or after this filter if needed.
+
+    All parameters are optional. The ``in-`` variants restrict what the filter
+    accepts as input. The ``out-`` variants change the audio format, without
+    actually doing a conversion. The data will be 'reinterpreted' by the
+    filters or audio outputs following this filter.
+
+    <in-format>
+        Force conversion to this format. See ``format`` filter for valid audio
+        format values.
+
+    <in-srate>
+        Force conversion to a specific sample rate. The rate is an integer,
+        48000 for example.
+
+    <in-channels>
+        Force mixing to a specific channel layout. See ``--channels`` option
+        for possible values.
+
+    <out-format>
+
+    <out-srate>
+
+    <out-channels>
+
 format[=format]
     Convert between different sample formats. Automatically enabled when
     needed by the sound card or another filter. See also ``--format``.
@@ -247,7 +252,7 @@ format[=format]
         rule that are also valid format specifiers: u8, s8, floatle, floatbe,
         floatne, mpeg2, and ac3.
 
-volume[=v[:sc]]
+volume[=v[:sc[:fast]]]
     Implements software volume control. Use this filter with caution since it
     can reduce the signal to noise ratio of the sound. In most cases it is
     best to set the level for the PCM sound to max, leave this filter out and
@@ -261,8 +266,7 @@ volume[=v[:sc]]
 
     This filter has a second feature: It measures the overall maximum sound
     level and prints out that level when mpv exits. This feature currently
-    only works with floating-point data, use e.g. ``--af-adv=force=5``, or use
-    ``--af=stats``.
+    only works with floating-point data.
 
     *NOTE*: This filter is not reentrant and can therefore only be enabled
     once for every audio stream.
@@ -278,6 +282,9 @@ volume[=v[:sc]]
 
         *WARNING*: This feature creates distortion and should be considered a
         last resort.
+    <fast>
+        Force S16 sample format if set to 1. Lower quality, but might be faster
+        in some situations.
 
     *EXAMPLE*:
 
@@ -313,6 +320,11 @@ pan=n[:L00:L01:L02:...L10:L11:L12:...Ln0:Ln1:Ln2:...]
         Would give 3 channel output leaving channels 0 and 1 intact, and mix
         channels 0 and 1 into output channel 2 (which could be sent to a
         subwoofer for example).
+
+    *NOTE*: if you just want to force remixing to a certain output channel
+    layout, it's easier to use the ``force`` filter. For example,
+    ``mpv '--af=force=channels=5.1' '--channels=5.1'`` would always force
+    remixing audio to 5.1 and output it like this.
 
 sub[=fc:ch]
     Adds a subwoofer channel to the audio stream. The audio data used for
@@ -428,8 +440,9 @@ extrastereo[=mul]
         (average of both channels), with 1.0 sound will be unchanged, with
         -1.0 left and right channels will be swapped.
 
-volnorm[=method:target]
-    Maximizes the volume without distorting the sound.
+drc[=method:target]
+    Applies dynamic range compression. This maximizes the volume by compressing
+    the audio signal's dynamic range.
 
     <method>
         Sets the used method.
@@ -444,6 +457,9 @@ volnorm[=method:target]
     <target>
         Sets the target amplitude as a fraction of the maximum for the sample
         type (default: 0.25).
+
+    *NOTE*: This filter can cause distortion with audio signals that have a
+    very large dynamic range.
 
 ladspa=file:label[:controls...]
     Load a LADSPA (Linux Audio Developer's Simple Plugin API) plugin. This

@@ -26,6 +26,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <ctype.h>
 
 #include "config.h"
 #include "core/mp_msg.h"
@@ -385,14 +386,14 @@ static subtitle *sub_ass_read_line_subviewer(stream_t *st, subtitle *current,
     int a1, a2, a3, a4, b1, b2, b3, b4, j = 0;
 
     while (!current->text[0]) {
-        char line[LINE_LEN + 1], full_line[LINE_LEN + 1], sep;
+        char line[LINE_LEN + 1], full_line[LINE_LEN + 1];
         int i;
 
         /* Parse SubRip header */
         if (!stream_read_line(st, line, LINE_LEN, utf16))
             return NULL;
-        if (sscanf(line, "%d:%d:%d%[,.:]%d --> %d:%d:%d%[,.:]%d",
-                     &a1, &a2, &a3, &sep, &a4, &b1, &b2, &b3, &sep, &b4) < 10)
+        if (sscanf(line, "%d:%d:%d%*1[,.:]%d --> %d:%d:%d%*1[,.:]%d",
+                     &a1, &a2, &a3, &a4, &b1, &b2, &b3, &b4) < 8)
             continue;
 
         current->start = a1 * 360000 + a2 * 6000 + a3 * 100 + a4 / 10;
@@ -449,7 +450,7 @@ static subtitle *sub_read_line_subviewer(stream_t *st,subtitle *current,
         return sub_ass_read_line_subviewer(st, current, args);
     while (!current->text[0]) {
 	if (!stream_read_line (st, line, LINE_LEN, utf16)) return NULL;
-	if ((len=sscanf (line, "%d:%d:%d%[,.:]%d --> %d:%d:%d%[,.:]%d",&a1,&a2,&a3,(char *)&i,&a4,&b1,&b2,&b3,(char *)&i,&b4)) < 10)
+	if ((len=sscanf (line, "%d:%d:%d%*1[,.:]%d --> %d:%d:%d%*1[,.:]%d",&a1,&a2,&a3,&a4,&b1,&b2,&b3,&b4)) < 8)
 	    continue;
 	current->start = a1*360000+a2*6000+a3*100+a4/10;
 	current->end   = b1*360000+b2*6000+b3*100+b4/10;
@@ -1073,7 +1074,7 @@ static int sub_autodetect (stream_t* st, int *uses_time, int utf16) {
 		{*uses_time=1;return SUB_MPL2;}
 	if (sscanf (line, "%d:%d:%d.%d,%d:%d:%d.%d",     &i, &i, &i, &i, &i, &i, &i, &i)==8)
 		{*uses_time=1;return SUB_SUBRIP;}
-	if (sscanf (line, "%d:%d:%d%[,.:]%d --> %d:%d:%d%[,.:]%d", &i, &i, &i, (char *)&i, &i, &i, &i, &i, (char *)&i, &i)==10)
+	if (sscanf (line, "%d:%d:%d%*1[,.:]%d --> %d:%d:%d%*1[,.:]%d", &i, &i, &i, &i, &i, &i, &i, &i) == 8)
 		{*uses_time=1;return SUB_SUBVIEWER;}
 	if (sscanf (line, "{T %d:%d:%d:%d",&i, &i, &i, &i)==4)
 		{*uses_time=1;return SUB_SUBVIEWER2;}
@@ -1323,8 +1324,8 @@ sub_data* sub_read_file(char *filename, float fps, struct MPOpts *opts)
     static const struct subreader sr[]=
     {
 	    { sub_read_line_microdvd, NULL, "microdvd" },
-	    { sub_read_line_subrip, NULL, "subrip" },
-	    { sub_read_line_subviewer, NULL, "subviewer" },
+	    { sub_read_line_subrip, NULL, "subviewer" },
+	    { sub_read_line_subviewer, NULL, "subrip" },
 	    { sub_read_line_sami, NULL, "sami" },
 	    { sub_read_line_vplayer, NULL, "vplayer" },
 	    { sub_read_line_rt, NULL, "rt" },
@@ -1510,7 +1511,7 @@ if ((suboverlap_enabled == 2) ||
 	                               // from a block of sub_to_add+1 subs
 	placeholder = malloc(sizeof(int *) * counter);
 	for (i = 0; i < counter; ++i) {
-	    placeholder[i] = malloc(sizeof(int) * lines_to_add);
+	    placeholder[i] = malloc(sizeof(int) * lines_to_add + 1);
 	    for (j = 0; j < lines_to_add; ++j) {
 		placeholder[i][j] = -1;
 	    }
@@ -1683,6 +1684,7 @@ if ((suboverlap_enabled == 2) ||
     if (return_sub == NULL) return NULL;
     subt_data = talloc_zero(NULL, sub_data);
     talloc_set_destructor(subt_data, sub_destroy);
+    subt_data->codec = srp->name;
     subt_data->filename = strdup(filename);
     subt_data->sub_uses_time = uses_time;
     subt_data->sub_num = sub_num;

@@ -41,6 +41,7 @@
 #include <winsock2.h>
 #endif
 
+#include "core/bstr.h"
 #include "core/mp_msg.h"
 #include "osdep/shmem.h"
 #include "osdep/timer.h"
@@ -312,6 +313,37 @@ static int stream_reconnect(stream_t *s)
     return 0;
 }
 
+void stream_set_capture_file(stream_t *s, const char *filename)
+{
+    if (!bstr_equals(bstr0(s->capture_filename), bstr0(filename))) {
+        if (s->capture_file)
+            fclose(s->capture_file);
+        talloc_free(s->capture_filename);
+        s->capture_file = NULL;
+        s->capture_filename = NULL;
+        if (filename) {
+            s->capture_file = fopen(filename, "wb");
+            if (s->capture_file) {
+                s->capture_filename = talloc_strdup(NULL, filename);
+            } else {
+                mp_tmsg(MSGT_GLOBAL, MSGL_ERR,
+                        "Error opening capture file: %s\n", strerror(errno));
+            }
+        }
+    }
+}
+
+void stream_capture_write(stream_t *s)
+{
+    if (s->capture_file) {
+        if (fwrite(s->buffer, s->buf_len, 1, s->capture_file) < 1) {
+            mp_tmsg(MSGT_GLOBAL, MSGL_ERR, "Error writing capture file: %s\n",
+                    strerror(errno));
+            stream_set_capture_file(s, NULL);
+        }
+    }
+}
+
 int stream_read_internal(stream_t *s, void *buf, int len)
 {
     int orig_len = len;
@@ -331,10 +363,6 @@ int stream_read_internal(stream_t *s, void *buf, int len)
                 len = read(s->fd, buf, len);
         }
         break;
-    case STREAMTYPE_DS:
-        len = demux_read_data((demux_stream_t *)s->priv, buf, len);
-        break;
-
 
     default:
         len = s->fill_buffer ? s->fill_buffer(s, buf, len) : 0;
@@ -371,6 +399,7 @@ int stream_fill_buffer(stream_t *s)
     s->buf_pos = 0;
     s->buf_len = len;
 //  printf("[%d]",len);fflush(stdout);
+    stream_capture_write(s);
     return len;
 }
 
@@ -570,6 +599,7 @@ void free_stream(stream_t *s)
 #ifdef CONFIG_STREAM_CACHE
     cache_uninit(s);
 #endif
+    stream_set_capture_file(s, NULL);
 
     if (s->close)
         s->close(s);
@@ -588,13 +618,6 @@ void free_stream(stream_t *s)
 #endif
     free(s->url);
     talloc_free(s);
-}
-
-stream_t *new_ds_stream(demux_stream_t *ds)
-{
-    stream_t *s = new_stream(-1, STREAMTYPE_DS);
-    s->priv = ds;
-    return s;
 }
 
 void stream_set_interrupt_callback(int (*cb)(struct input_ctx *, int),
@@ -649,16 +672,14 @@ static const uint8_t *find_newline(const uint8_t *buf, int len, int utf16)
         return (uint8_t *)memchr(buf, '\n', len);
     case 1:
         while (buf < end - 1) {
-            GET_UTF16(c, buf < end - 1 ? get_le16_inc(&buf) : 0, return NULL;
-                      )
+            GET_UTF16(c, buf < end - 1 ? get_le16_inc(&buf) : 0, return NULL;)
             if (buf <= end && c == '\n')
                 return buf - 1;
         }
         break;
     case 2:
         while (buf < end - 1) {
-            GET_UTF16(c, buf < end - 1 ? get_be16_inc(&buf) : 0, return NULL;
-                      )
+            GET_UTF16(c, buf < end - 1 ? get_be16_inc(&buf) : 0, return NULL;)
             if (buf <= end && c == '\n')
                 return buf - 1;
         }
@@ -666,6 +687,8 @@ static const uint8_t *find_newline(const uint8_t *buf, int len, int utf16)
     }
     return NULL;
 }
+
+#define EMPTY_STMT do{}while(0);
 
 /**
  * Copy a number of bytes, converting to UTF-8 if input is UTF-16
@@ -691,20 +714,16 @@ static int copy_characters(uint8_t *dst, int dstsize,
     case 1:
         while (src < end - 1 && dst_end - dst > 8) {
             uint8_t tmp;
-            GET_UTF16(c, src < end - 1 ? get_le16_inc(&src) : 0,;
-                      )
-            PUT_UTF8(c, tmp, *dst++ = tmp;
-                     )
+            GET_UTF16(c, src < end - 1 ? get_le16_inc(&src) : 0, EMPTY_STMT)
+            PUT_UTF8(c, tmp, *dst++ = tmp; EMPTY_STMT)
         }
         *len -= end - src;
         return dstsize - (dst_end - dst);
     case 2:
         while (src < end - 1 && dst_end - dst > 8) {
             uint8_t tmp;
-            GET_UTF16(c, src < end - 1 ? get_be16_inc(&src) : 0,;
-                      )
-            PUT_UTF8(c, tmp, *dst++ = tmp;
-                     )
+            GET_UTF16(c, src < end - 1 ? get_be16_inc(&src) : 0, EMPTY_STMT)
+            PUT_UTF8(c, tmp, *dst++ = tmp; EMPTY_STMT)
         }
         *len -= end - src;
         return dstsize - (dst_end - dst);
@@ -783,4 +802,9 @@ struct bstr stream_read_complete(struct stream *s, void *talloc_ctx,
     return (struct bstr){
                buf, total_read
     };
+}
+
+bool stream_manages_timeline(struct stream *s)
+{
+    return stream_control(s, STREAM_CTRL_MANAGES_TIMELINE, NULL) == STREAM_OK;
 }

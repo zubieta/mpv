@@ -99,6 +99,7 @@ switch(video_codec){
     // in case no strf chunk has been seen in avi, we have no bitmap header
     if(!sh_video->bih) return 0;
     sh_video->format=sh_video->bih->biCompression;
+    mp_set_video_codec_from_tag(sh_video);
     sh_video->disp_w=sh_video->bih->biWidth;
     sh_video->disp_h=abs(sh_video->bih->biHeight);
   }
@@ -392,7 +393,9 @@ mpeg_header_parser:
   break;
  }
 } // switch(file_format)
-
+if (d_video->demuxer->file_format == DEMUXER_TYPE_MPEG_PS ||
+    d_video->demuxer->file_format == DEMUXER_TYPE_MPEG_TS)
+  mp_set_video_codec_from_tag(sh_video);
 return 1;
 }
 
@@ -422,7 +425,6 @@ int video_read_frame(sh_video_t* sh_video,float* frame_time_ptr,unsigned char** 
     int picture_coding_type=0;
     int in_size=0;
     video_codec_t video_codec = find_video_codec(sh_video);
-    sh_video->needs_parsing = video_codec != VIDEO_OTHER;
 
     *start=NULL;
 
@@ -557,10 +559,6 @@ int video_read_frame(sh_video_t* sh_video,float* frame_time_ptr,unsigned char** 
 
 
 //------------------------ frame decoded. --------------------
-
-    // Increase video timers:
-    sh_video->num_frames+=frame_time;
-    ++sh_video->num_frames_decoded;
 
     frame_time*=sh_video->frametime;
 

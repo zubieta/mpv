@@ -42,7 +42,6 @@
 #define STREAMTYPE_DVD  3      // libdvdread
 #define STREAMTYPE_MEMORY  4   // read data from memory area
 #define STREAMTYPE_PLAYLIST 6  // FIXME!!! same as STREAMTYPE_FILE now
-#define STREAMTYPE_DS   8      // read from a demuxer stream
 #define STREAMTYPE_CDDA 10     // raw audio CD reader
 #define STREAMTYPE_SMB 11      // smb:// url, using libsmbclient (samba)
 #define STREAMTYPE_VCDBINCUE 12      // vcd directly from bin/cue files
@@ -102,6 +101,10 @@
 #define STREAM_CTRL_GET_CACHE_FILL 16
 #define STREAM_CTRL_GET_CACHE_IDLE 17
 #define STREAM_CTRL_RECONNECT 18
+// DVD/Bluray, signal general support for GET_CURRENT_TIME etc.
+#define STREAM_CTRL_MANAGES_TIMELINE 19
+#define STREAM_CTRL_GET_START_TIME 20
+#define STREAM_CTRL_GET_CHAPTER_TIME 21
 
 struct stream_lang_req {
     int type;     // STREAM_AUDIO, STREAM_SUB
@@ -185,6 +188,9 @@ typedef struct stream {
     unsigned char buffer[STREAM_BUFFER_SIZE >
                          STREAM_MAX_SECTOR_SIZE ? STREAM_BUFFER_SIZE :
                          STREAM_MAX_SECTOR_SIZE];
+
+    FILE *capture_file;
+    char *capture_filename;
 } stream_t;
 
 #ifdef CONFIG_NETWORKING
@@ -193,6 +199,9 @@ typedef struct stream {
 
 int stream_fill_buffer(stream_t *s);
 int stream_seek_long(stream_t *s, int64_t pos);
+
+void stream_set_capture_file(stream_t *s, const char *filename);
+void stream_capture_write(stream_t *s);
 
 #ifdef CONFIG_STREAM_CACHE
 int stream_enable_cache_percent(stream_t *stream, int64_t stream_cache_size,
@@ -393,7 +402,6 @@ stream_t *open_stream(const char *filename, struct MPOpts *options,
                       int *file_format);
 stream_t *open_output_stream(const char *filename, struct MPOpts *options);
 struct demux_stream;
-struct stream *new_ds_stream(struct demux_stream *ds);
 
 /// Set the callback to be used by libstream to check for user
 /// interruption during long blocking operations (cache filling, etc).
@@ -408,11 +416,12 @@ int stream_read_internal(stream_t *s, void *buf, int len);
 /// Internal seek function bypassing the stream buffer
 int stream_seek_internal(stream_t *s, int64_t newpos);
 
-extern int bluray_angle;
-extern int bluray_chapter;
+bool stream_manages_timeline(stream_t *s);
+
 extern int dvd_title;
 extern int dvd_angle;
 
+extern int bluray_angle;
 extern char *bluray_device;
 
 typedef struct {

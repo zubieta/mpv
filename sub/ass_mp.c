@@ -69,6 +69,9 @@ void mp_ass_set_style(ASS_Style *style, struct osd_style_opts *opts)
     style->MarginV = opts->margin_y * scale;
     style->ScaleX = 1.;
     style->ScaleY = 1.;
+#if LIBASS_VERSION >= 0x01020000
+    style->Blur = opts->blur;
+#endif
 }
 
 ASS_Track *mp_ass_default_track(ASS_Library *library, struct MPOpts *opts)
@@ -262,12 +265,14 @@ void mp_ass_configure_fonts(ASS_Renderer *priv, struct osd_style_opts *opts)
     char *default_font = mp_find_user_config_file("subfont.ttf");
     char *config       = mp_find_config_file("fonts.conf");
 
-    if (!mp_path_exists(default_font)) {
+    if (default_font && !mp_path_exists(default_font)) {
         talloc_free(default_font);
         default_font = NULL;
     }
 
+    mp_msg(MSGT_ASS, MSGL_V, "[ass] Setting up fonts...\n");
     ass_set_fonts(priv, default_font, opts->font, 1, config, 1);
+    mp_msg(MSGT_ASS, MSGL_V, "[ass] Done.\n");
 
     talloc_free(default_font);
     talloc_free(config);
@@ -334,7 +339,8 @@ ASS_Library *mp_ass_init(struct MPOpts *opts)
     char *path = mp_find_user_config_file("fonts");
     priv = ass_library_init();
     ass_set_message_cb(priv, message_callback, NULL);
-    ass_set_fonts_dir(priv, path);
+    if (path)
+        ass_set_fonts_dir(priv, path);
     ass_set_extract_fonts(priv, opts->use_embedded_fonts);
     talloc_free(path);
     return priv;

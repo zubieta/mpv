@@ -10,11 +10,10 @@
 /mpv
 /mpv.app
 /version.h
-/core/codecs.conf.h
 /core/input/input_conf.h
 /tags
 /TAGS
-/video/out/vo_opengl_shaders.h
+/video/out/gl_video_shaders.h
 /video/out/vdpau_template.c
 /demux/ebml_defs.c
 /demux/ebml_types.h

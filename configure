@@ -298,17 +298,13 @@ Optional features:
   --enable-lirc          enable LIRC (remote control) support [autodetect]
   --enable-lircc         enable LIRCCD (LIRC client daemon) input [autodetect]
   --enable-joystick      enable joystick support [disable]
-  --enable-apple-remote  enable Apple Remote input (Mac OS X only) [autodetect]
-  --enable-apple-ir      enable Apple IR Remote input (Linux only) [autodetect]
   --disable-vm           disable X video mode extensions [autodetect]
   --disable-xf86keysym   disable support for multimedia keys [autodetect]
   --enable-radio         enable radio interface [disable]
   --enable-radio-capture enable radio capture (through PCI/line-in) [disable]
   --disable-radio-v4l2   disable Video4Linux2 radio interface [autodetect]
-  --disable-radio-bsdbt848   disable BSD BT848 radio interface [autodetect]
   --disable-tv           disable TV interface (TV/DVB grabbers) [enable]
   --disable-tv-v4l2      disable Video4Linux2 TV interface [autodetect]
-  --disable-tv-bsdbt848  disable BSD BT848 interface [autodetect]
   --disable-pvr          disable Video4Linux2 MPEG PVR [autodetect]
   --disable-networking   disable networking [enable]
   --enable-winsock2_h    enable winsock2_h [autodetect]
@@ -320,8 +316,6 @@ Optional features:
   --disable-dvdread      disable libdvdread [autodetect]
   --disable-cddb         disable cddb [autodetect]
   --disable-enca         disable ENCA charset oracle library [autodetect]
-  --enable-macosx-finder enable Mac OS X Finder invocation parameter
-                         parsing [disabled]
   --enable-macosx-bundle enable Mac OS X bundle file locations [autodetect]
   --disable-inet6        disable IPv6 support [autodetect]
   --disable-gethostbyname2  gethostbyname2 part of the C library [autodetect]
@@ -332,8 +326,9 @@ Optional features:
   --disable-libass-osd   disable OSD rendering with libass [autodetect]
   --enable-rpath         enable runtime linker path for extra libs [disabled]
   --disable-libpostproc  disable postprocess filter (vf_pp) [autodetect]
-  --enable-libavdevice   enable libavdevice demuxers [disabled]
-  --enable-libavfilter   enable libavfilter [disabled] [unused]
+  --disable-libavdevice  enable libavdevice demuxers [autodetect]
+  --disable-libavfilter  enable libavfilter [autodetect]
+  --disable-vf-lavfi     enable vf_lavfi libavfilter bridge [audodetect]
 
 Codecs:
   --enable-mng              enable MNG input support [autodetect]
@@ -345,17 +340,21 @@ Codecs:
   --disable-mpg123          disable libmpg123 MP3 decoding support [autodetect]
   --disable-libxmp          disable libxmp support [autodetect]
 
+Resampler:
+  --disable-libavresample   check for libswresample only [autodetect]
+
 Video output:
   --enable-gl              enable OpenGL video output [autodetect]
   --enable-caca            enable CACA  video output [autodetect]
   --enable-direct3d        enable Direct3D video output [autodetect]
-  --enable-sdl             enable SDL audio output [autodetect]
-  --enable-sdl2            enable SDL 2.0+ audio and video output [autodetect]
+  --enable-sdl             enable SDL audio output [disable]
+  --enable-sdl2            enable SDL 2.0+ audio and video output [disable]
   --enable-xv              enable Xv video output [autodetect]
   --enable-vdpau           enable VDPAU acceleration [autodetect]
   --enable-vm              enable XF86VidMode support [autodetect]
   --enable-xinerama        enable Xinerama support [autodetect]
   --enable-x11             enable X11 video output [autodetect]
+  --enable-wayland         enable Wayland video output [autodetect]
   --disable-xss            disable screensaver support via xss [autodetect]
   --disable-corevideo      disable CoreVideo video output [autodetect]
   --disable-cocoa          disable Cocoa OpenGL backend [autodetect]
@@ -418,13 +417,15 @@ _cross_compile=no
 _prefix="/usr/local"
 ffmpeg=auto
 _encoding=yes
+_disable_avresample=no
 _x11=auto
+_wayland=auto
 _xss=auto
 _xv=auto
 _vdpau=auto
 _direct3d=auto
-_sdl=auto
-_sdl2=auto
+_sdl=no
+_sdl2=no
 _dsound=auto
 _mng=auto
 _jpeg=auto
@@ -456,10 +457,8 @@ _select=yes
 _radio=no
 _radio_capture=no
 _radio_v4l2=auto
-_radio_bsdbt848=auto
 _tv=yes
 _tv_v4l2=auto
-_tv_bsdbt848=auto
 _pvr=auto
 networking=yes
 _winsock2_h=auto
@@ -468,8 +467,6 @@ _libquvi=auto
 _joystick=no
 _lirc=auto
 _lircc=auto
-_apple_remote=auto
-_apple_ir=auto
 _termcap=auto
 _termios=auto
 _shm=auto
@@ -479,7 +476,6 @@ _cddb=auto
 _coreaudio=auto
 _corevideo=auto
 _cocoa=auto
-_macosx_finder=no
 _macosx_bundle=auto
 _enca=auto
 _inet6=auto
@@ -491,8 +487,9 @@ _ass=auto
 _libass_osd=auto
 _rpath=no
 libpostproc=auto
-libavfilter=no
-libavdevice=no
+libavfilter=auto
+vf_lavfi=auto
+libavdevice=auto
 _stream_cache=yes
 _priority=no
 def_dos_paths="#define HAVE_DOS_PATHS 0"
@@ -582,6 +579,8 @@ for ac_option do
   --disable-cross-compile)          _cross_compile=no           ;;
   --enable-encoding)    _encoding=yes   ;;
   --disable-encoding)   _encoding=no    ;;
+  --enable-wayland)     _wayland=yes    ;;
+  --disable-wayland)    _wayland=no     ;;
   --enable-x11)         _x11=yes        ;;
   --disable-x11)        _x11=no         ;;
   --enable-xss)         _xss=yes        ;;
@@ -650,8 +649,6 @@ for ac_option do
   --disable-alsa)       _alsa=no        ;;
   --enable-tv)          _tv=yes         ;;
   --disable-tv)         _tv=no          ;;
-  --enable-tv-bsdbt848)  _tv_bsdbt848=yes ;;
-  --disable-tv-bsdbt848) _tv_bsdbt848=no  ;;
   --enable-tv-v4l2)     _tv_v4l2=yes    ;;
   --disable-tv-v4l2)    _tv_v4l2=no     ;;
   --enable-radio)       _radio=yes      ;;
@@ -660,8 +657,6 @@ for ac_option do
   --disable-radio)      _radio=no       ;;
   --enable-radio-v4l2)  _radio_v4l2=yes ;;
   --disable-radio-v4l2) _radio_v4l2=no  ;;
-  --enable-radio-bsdbt848)      _radio_bsdbt848=yes     ;;
-  --disable-radio-bsdbt848)     _radio_bsdbt848=no      ;;
   --enable-pvr)         _pvr=yes        ;;
   --disable-pvr)        _pvr=no         ;;
   --enable-networking)     networking=yes    ;;
@@ -675,15 +670,13 @@ for ac_option do
   --enable-joystick)    _joystick=yes   ;;
   --disable-joystick)   _joystick=no    ;;
   --enable-libav)       ffmpeg=yes      ;;
+  --disable-libavresample) _disable_avresample=yes ;;
+  --enable-libavresample) _disable_avresample=no   ;;
 
   --enable-lirc)        _lirc=yes       ;;
   --disable-lirc)       _lirc=no        ;;
   --enable-lircc)       _lircc=yes      ;;
   --disable-lircc)      _lircc=no       ;;
-  --enable-apple-remote)  _apple_remote=yes ;;
-  --disable-apple-remote) _apple_remote=no  ;;
-  --enable-apple-ir)    _apple_ir=yes   ;;
-  --disable-apple-ir)   _apple_ir=no    ;;
   --enable-termcap)     _termcap=yes    ;;
   --disable-termcap)    _termcap=no     ;;
   --enable-termios)     _termios=yes    ;;
@@ -712,6 +705,8 @@ for ac_option do
   --disable-libavdevice) libavdevice=no ;;
   --enable-libavfilter) libavfilter=auto ;;
   --disable-libavfilter) libavfilter=no ;;
+  --enable-vf-lavfi)    vf_lavfi=auto ;;
+  --disable-vf-lavfi)   vf_lavfi=no ;;
 
   --enable-enca)        _enca=yes       ;;
   --disable-enca)       _enca=no        ;;
@@ -728,8 +723,6 @@ for ac_option do
   --disable-corevideo) _corevideo=no ;;
   --enable-cocoa) _cocoa=yes ;;
   --disable-cocoa) _cocoa=no ;;
-  --enable-macosx-finder) _macosx_finder=yes ;;
-  --disable-macosx-finder) _macosx_finder=no ;;
   --enable-macosx-bundle) _macosx_bundle=yes ;;
   --disable-macosx-bundle) _macosx_bundle=no ;;
 
@@ -880,7 +873,7 @@ else # if test -z "$_target"
   fi
 fi
 
-extra_cflags="-I. $extra_cflags"
+extra_cflags="-I. -D_GNU_SOURCE $extra_cflags"
 _timer=timer-linux.c
 _getch=getch2.c
 
@@ -1126,7 +1119,7 @@ cflag_check -pipe -I. && _pipe="-pipe" && echores "yes" || echores "no"
 # Checking for CFLAGS
 if test -z "$CFLAGS" ; then
   if test "$cc_vendor" = "intel" ; then
-    CFLAGS="$_opt $_debug $_pipe -fomit-frame-pointer"
+    CFLAGS="$_opt $_debug $_pipe"
     WARNFLAGS="-wd167 -wd556 -wd144"
   elif test "$cc_vendor" = "clang"; then
     CFLAGS="$_opt $_debug $_pipe"
@@ -1135,10 +1128,10 @@ if test -z "$CFLAGS" ; then
   elif test "$cc_vendor" != "gnu" ; then
     CFLAGS="$_opt $_debug $_pipe"
   else
-    CFLAGS="$_opt $_debug $_pipe -ffast-math -fomit-frame-pointer"
+    CFLAGS="$_opt $_debug $_pipe"
     WARNFLAGS="-Wall -Wno-switch -Wno-parentheses -Wpointer-arith -Wredundant-decls"
     ERRORFLAGS="-Werror-implicit-function-declaration"
-    extra_ldflags="$extra_ldflags -ffast-math"
+    extra_ldflags="$extra_ldflags"
   fi
 else
   warn_cflags=yes
@@ -1671,76 +1664,16 @@ echores "$_sys_sysinfo"
 
 if darwin; then
 
-echocheck "Mac OS X Finder Support"
-def_macosx_finder='#undef CONFIG_MACOSX_FINDER'
-if test "$_macosx_finder" = yes ; then
-  def_macosx_finder='#define CONFIG_MACOSX_FINDER 1'
-  libs_mplayer="$libs_mplayer -framework Cocoa"
-fi
-echores "$_macosx_finder"
-
 echocheck "Mac OS X Bundle file locations"
 def_macosx_bundle='#undef CONFIG_MACOSX_BUNDLE'
-test "$_macosx_bundle" = auto && _macosx_bundle=$_macosx_finder
+test "$_macosx_bundle" = auto
 if test "$_macosx_bundle" = yes ; then
   extra_ldflags="$extra_ldflags -headerpad_max_install_names"
   def_macosx_bundle='#define CONFIG_MACOSX_BUNDLE 1'
 fi
 echores "$_macosx_bundle"
 
-echocheck "Apple Remote"
-if test "$_apple_remote" = auto ; then
-  _apple_remote=no
-  cat > $TMPC <<EOF
-#include <stdio.h>
-#include <IOKit/IOCFPlugIn.h>
-int main(void) {
-  io_iterator_t hidObjectIterator = (io_iterator_t)NULL;
-  CFMutableDictionaryRef hidMatchDictionary;
-  IOReturn ioReturnValue;
-
-  // Set up a matching dictionary to search the I/O Registry by class.
-  // name for all HID class devices
-  hidMatchDictionary = IOServiceMatching("AppleIRController");
-
-  // Now search I/O Registry for matching devices.
-  ioReturnValue = IOServiceGetMatchingServices(kIOMasterPortDefault,
-                      hidMatchDictionary, &hidObjectIterator);
-
-  // If search is unsuccessful, return nonzero.
-  if (ioReturnValue != kIOReturnSuccess ||
-                       !IOIteratorIsValid(hidObjectIterator)) {
-    return 1;
-  }
-  return 0;
-}
-EOF
-  cc_check -framework IOKit && _apple_remote=yes
-fi
-if test "$_apple_remote" = yes ; then
-  def_apple_remote='#define CONFIG_APPLE_REMOTE 1'
-  libs_mplayer="$libs_mplayer -framework IOKit -framework Cocoa"
-else
-  def_apple_remote='#undef CONFIG_APPLE_REMOTE'
-fi
-echores "$_apple_remote"
-
 fi #if darwin
-
-if linux; then
-
-echocheck "Apple IR"
-if test "$_apple_ir" = auto ; then
-  _apple_ir=no
-  statement_check linux/input.h 'struct input_event ev; struct input_id id' && _apple_ir=yes
-fi
-if test "$_apple_ir" = yes ; then
-  def_apple_ir='#define CONFIG_APPLE_IR 1'
-else
-  def_apple_ir='#undef CONFIG_APPLE_IR'
-fi
-echores "$_apple_ir"
-fi #if linux
 
 echocheck "pkg-config"
 if $($_pkg_config --version > /dev/null 2>&1); then
@@ -1841,6 +1774,17 @@ depends_on_application_services(){
 
 fi #if darwin
 
+echocheck "Wayland"
+if test "$_wayland" != no; then
+ _wayland="no"
+  pkg_config_add "wayland-client >= 1.0.0 wayland-egl >= 9.0.0 wayland-cursor >= 1.0.0 xkbcommon >= 0.3.0" \
+  && _wayland="yes"
+  res_comment=""
+else
+  _wayland="no"
+  res_comment=""
+fi
+echores "$_wayland"
 
 echocheck "X11 headers presence"
   _x11_headers="no"
@@ -1876,7 +1820,7 @@ if test "$_x11" = auto && test "$_x11_headers" = yes ; then
     else
       _ld_tmp="$I -lXext -lX11 $_ld_pthread"
     fi
-    statement_check X11/Xutil.h 'XCreateWindow(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)' $_ld_tmp &&
+    statement_check_broken X11/Xutil.h X11/XKBlib.h 'XCreateWindow(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)' $_ld_tmp &&
       _x11=yes
     # Check that there aren't conflicting headers between ApplicationServices
     # and X11. On versions of Mac OSX prior to 10.7 the deprecated QuickDraw API
@@ -2117,20 +2061,23 @@ fi
 # conflicts between -lGL and -framework OpenGL
 echocheck "OpenGL"
 #Note: this test is run even with --enable-gl since we autodetect linker flags
-if (test "$_x11" = yes || test "$_cocoa" = yes || win32) && test "$_gl" != no ; then
+if (test "$_x11" = yes || test "$_wayland" = yes || test "$_cocoa" = yes || win32) && test "$_gl" != no ; then
   cat > $TMPC << EOF
 #ifdef GL_WIN32
 #include <windows.h>
-#include <GL/gl.h>
+#elif defined(GL_WAYLAND)
+#include <EGL/egl.h>
 #else
-#include <GL/gl.h>
 #include <X11/Xlib.h>
 #include <GL/glx.h>
 #endif
+#include <GL/gl.h>
 int main(int argc, char *argv[]) {
 #ifdef GL_WIN32
   HDC dc;
   wglCreateContext(dc);
+#elif defined(GL_WAYLAND)
+  eglCreateContext(NULL, NULL, EGL_NO_CONTEXT, NULL);
 #else
   glXCreateContext(NULL, NULL, NULL, True);
 #endif
@@ -2149,6 +2096,11 @@ EOF
       fi
     done
   fi
+  if test "$_wayland" = yes && cc_check -DGL_WAYLAND -lGL -lEGL ; then
+    _gl=yes
+    _gl_wayland=yes
+    libs_mplayer="$libs_mplayer -lGL -lEGL"
+  fi
   if win32 && cc_check -DGL_WIN32 -lopengl32 ; then
     _gl=yes
     _gl_win32=yes
@@ -2157,6 +2109,27 @@ EOF
   if test "$_cocoa" = yes ; then
     _gl=yes
     _gl_cocoa=yes
+  fi
+
+  cat > $TMPC << EOF
+#ifdef __APPLE__
+#include <OpenGL/gl.h>
+#include <OpenGL/glext.h>
+#else
+#include <GL/gl.h>
+#include <GL/glext.h>
+#endif
+int main(int argc, char *argv[]) {
+  return !GL_INVALID_FRAMEBUFFER_OPERATION;
+}
+EOF
+  if ! cc_check; then
+    _gl=no
+    _gl_x11=no
+    _gl_wayland=no
+    _gl_win32=no
+    _gl_cocoa=no
+    res_comment="missing glext.h, get from http://www.opengl.org/registry/api/glext.h"
   fi
 else
   _gl=no
@@ -2176,12 +2149,17 @@ if test "$_gl" = yes ; then
     def_gl_x11='#define CONFIG_GL_X11 1'
     res_comment="$res_comment x11"
   fi
+  if test "$_gl_wayland" = yes ; then
+    def_gl_wayland='#define CONFIG_GL_WAYLAND'
+    res_comment="$res_comment wayland"
+  fi
   vomodules="opengl $vomodules"
 else
   def_gl='#undef CONFIG_GL'
   def_gl_cocoa='#undef CONFIG_GL_COCOA'
   def_gl_win32='#undef CONFIG_GL_WIN32'
   def_gl_x11='#undef CONFIG_GL_X11'
+  def_gl_wayland='#undef CONFIG_GL_WAYLAND'
   novomodules="opengl $novomodules"
 fi
 echores "$_gl"
@@ -2224,7 +2202,7 @@ fi #if win32; then
 
 
 echocheck "SDL 2.0"
-if test "$_sdl2" = auto ; then
+if test "$_sdl2" = yes ; then
   pkg_config_add 'sdl2' && _sdl2=yes
 fi
 if test "$_sdl2" = yes ; then
@@ -2238,7 +2216,7 @@ else
   def_sdl2='#undef CONFIG_SDL2'
   echores "$_sdl2"
   echocheck "SDL"
-  if test "$_sdl" = auto ; then
+  if test "$_sdl" = yes ; then
     pkg_config_add 'sdl' && _sdl=yes
   fi
   if test "$_sdl" = yes ; then
@@ -2469,7 +2447,7 @@ if test "$_vcd" = auto; then
   if linux || freebsd || netbsd || openbsd || dragonfly || darwin ; then
     _vcd=yes
   elif mingw32; then
-  header_check ddk/ntddcdrm.h && _vcd=yes
+  header_check ntddcdrm.h && _vcd=yes
   fi
 fi
 if test "$_vcd" = yes; then
@@ -2670,9 +2648,7 @@ fi
 echores "$_lcms2"
 
 
-# Test with > against Libav 0.8 versions which will NOT work rather than
-# specify minimum version, to allow (future) point releases to possibly work.
-all_libav_libs="libavutil > 51.22.0:libavcodec >= 53.35.0:libavformat > 53.20.0:libswscale >= 2.0.0"
+all_libav_libs="libavutil > 51.73.0:libavcodec > 54.34.0:libavformat > 54.19.0:libswscale >= 2.0.0"
 echocheck "Libav ($all_libav_libs)"
 if test "$ffmpeg" = auto ; then
   IFS=":"   # shell should not be used for programming
@@ -2683,20 +2659,89 @@ fi
 echores "yes"
 
 
-echocheck "Libav 0.8 compatibility hack"
-if test "$_encoding" = yes && $_pkg_config "libavcodec >= 54.0.0" ; then
-    echores "no"
-else
-    _encoding=no
-    echores "yes"
+_resampler=no
+_avresample=no
+_avresample_has_set_channel_mapping=no
+
+echocheck "libavresample >= 1.0.0"
+if test "$_disable_avresample" = no ; then
+  if pkg_config_add "libavresample >= 1.0.0" ; then
+    _resampler=yes
+    _avresample=yes
+    def_resampler='#define CONFIG_LIBAVRESAMPLE'
+  fi
+fi
+echores "$_resampler"
+
+if test "$_avresample" = yes ; then
+  echocheck "libavresample avresample_set_channel_mapping() API"
+  statement_check libavresample/avresample.h 'avresample_set_channel_mapping(NULL, NULL)' && _avresample_has_set_channel_mapping=yes
+  echores "$_avresample_has_set_channel_mapping"
 fi
 
 
-echocheck "libavfilter >= 3.17.0"
+if test "$_resampler" = no ; then
+  echocheck "libswresample >= 0.17.102"
+  if pkg_config_add "libswresample >= 0.17.102" ; then
+    _resampler=yes
+    def_resampler='#define CONFIG_LIBSWRESAMPLE'
+  fi
+  echores "$_resampler"
+fi
+
+
+if test "$_resampler" = no ; then
+  die "No resampler found. Install libavresample or libswresample (FFmpeg)."
+fi
+
+if test "$_avresample_has_set_channel_mapping" = yes ; then
+  def_avresample_has_set_channel_mapping='#define HAVE_AVRESAMPLE_SET_CHANNEL_MAPPING 1'
+else
+  def_avresample_has_set_channel_mapping='#define HAVE_AVRESAMPLE_SET_CHANNEL_MAPPING 0'
+fi
+
+
+echocheck "libavutil QP API"
+_avutil_has_qp_api=no
+statement_check libavutil/frame.h 'av_frame_get_qp_table(NULL, NULL, NULL)' && _avutil_has_qp_api=yes
+if test "$_avutil_has_qp_api" = yes ; then
+  def_avutil_has_qp_api='#define HAVE_AVUTIL_QP_API 1'
+else
+  def_avutil_has_qp_api='#define HAVE_AVUTIL_QP_API 0'
+fi
+echores "$_avutil_has_qp_api"
+
+
+echocheck "libavutil ref-counting API"
+_avutil_has_refcounting=no
+statement_check libavutil/frame.h 'av_frame_unref(NULL)' && _avutil_has_refcounting=yes
+if test "$_avutil_has_refcounting" = yes ; then
+  def_avutil_has_refcounting='#define HAVE_AVUTIL_REFCOUNTING 1'
+else
+  def_avutil_has_refcounting='#define HAVE_AVUTIL_REFCOUNTING 0'
+fi
+echores "$_avutil_has_refcounting"
+
+
+# libavfilter as it can be used by vf_lavfi is 3.45.101 in FFmpeg, and
+# 3.5.0 in Libav. Completely useless version numbers.
+echocheck "libavfilter"
 if test "$libavfilter" = auto ; then
     libavfilter=no
-    if pkg_config_add "libavfilter >= 3.17.0" ; then
+
+    cat > $TMPC <<EOF
+#include <libavfilter/avfilter.h>
+void vf_next_query_format() {}
+int main(void) {
+    avfilter_register_all();
+    vf_next_query_format();
+    return 0;
+}
+EOF
+    if cc_check `$_pkg_config libavfilter --cflags --libs` && pkg_config_add "libavfilter" ; then
         libavfilter=yes
+    else
+        res_comment="not found or broken"
     fi
 fi
 if test "$libavfilter" = yes ; then
@@ -2707,10 +2752,30 @@ fi
 echores "$libavfilter"
 
 
+echocheck "using libavfilter through vf_lavfi"
+if test "$vf_lavfi" = auto ; then
+    vf_lavfi=no
+    if test "$libavfilter" = yes ; then
+        if test "$_avutil_has_refcounting" = no ; then
+            res_comment="libavutil too old"
+        else
+            vf_lavfi=yes
+        fi
+    fi
+fi
+if test "$vf_lavfi" = yes ; then
+    def_vf_lavfi='#define CONFIG_VF_LAVFI 1'
+else
+    def_vf_lavfi='#undef CONFIG_VF_LAVFI'
+fi
+echores "$vf_lavfi"
+
+
 echocheck "libavdevice >= 54.0.0"
 if test "$libavdevice" = auto ; then
     libavdevice=no
-    if pkg_config_add "libavdevice >= 54.0.0" ; then
+    # Usually, libavdevice depends on libavfilter
+    if test "$libavfilter" = yes && pkg_config_add "libavdevice >= 54.0.0" ; then
         libavdevice=yes
     fi
 fi
@@ -2746,81 +2811,6 @@ else
   def_tv='#undef CONFIG_TV'
 fi
 echores "$_tv"
-
-
-if freebsd || netbsd || openbsd || dragonfly ; then
-  echocheck "*BSD BT848 bt8xx header"
-  _ioctl_bt848_h=no
-  for file in "machine/ioctl_bt848.h" \
-            "dev/bktr/ioctl_bt848.h" \
-            "dev/video/bktr/ioctl_bt848.h" \
-            "dev/ic/bt8xx.h" ; do
-    cat > $TMPC <<EOF
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <$file>
-int main(void) { ioctl(0, TVTUNER_GETFREQ, 0); return 0; }
-EOF
-    if cc_check ; then
-     _ioctl_bt848_h=yes
-     _ioctl_bt848_h_name="$file"
-     break;
-    fi
-  done
-  if test "$_ioctl_bt848_h" = yes ; then
-    def_ioctl_bt848_h_name="#define IOCTL_BT848_H_NAME <$_ioctl_bt848_h_name>"
-    res_comment="using $_ioctl_bt848_h_name"
-  else
-    def_ioctl_bt848_h_name="#undef IOCTL_BT848_H_NAME"
-  fi
-  echores "$_ioctl_bt848_h"
-
-  echocheck "*BSD ioctl_meteor.h"
-  _ioctl_meteor_h=no
-  for ioctl_meteor_h_path in "machine/ioctl_meteor.h" "dev/bktr/ioctl_meteor.h" "dev/video/bktr/ioctl_meteor.h" ; do
-    statement_check_broken "sys/types.h" "$ioctl_meteor_h_path" 'ioctl(0, METEORSINPUT, 0)' &&
-      _ioctl_meteor_h=yes && break
-  done
-  if test "$_ioctl_meteor_h" = yes ; then
-    def_ioctl_meteor_h_name="#define IOCTL_METEOR_H_NAME <$ioctl_meteor_h_path>"
-    res_comment="using $ioctl_meteor_h_path"
-  else
-    def_ioctl_meteor_h_name="#undef IOCTL_METEOR_H_NAME"
-  fi
-  echores "$_ioctl_meteor_h"
-
-  echocheck "*BSD BrookTree 848 TV interface"
-  if test "$_tv_bsdbt848" = auto ; then
-    _tv_bsdbt848=no
-    if test "$_tv" = yes ; then
-      cat > $TMPC <<EOF
-#include <sys/types.h>
-$def_ioctl_meteor_h_name
-$def_ioctl_bt848_h_name
-#ifdef IOCTL_METEOR_H_NAME
-#include IOCTL_METEOR_H_NAME
-#endif
-#ifdef IOCTL_BT848_H_NAME
-#include IOCTL_BT848_H_NAME
-#endif
-int main(void) {
- ioctl(0, METEORSINPUT, 0);
- ioctl(0, TVTUNER_GETFREQ, 0);
- return 0;
-}
-EOF
-      cc_check && _tv_bsdbt848=yes
-    fi
-  fi
-  if test "$_tv_bsdbt848" = yes ; then
-    def_tv_bsdbt848='#define CONFIG_TV_BSDBT848 1'
-    inputmodules="tv-bsdbt848 $inputmodules"
-  else
-    def_tv_bsdbt848='#undef CONFIG_TV_BSDBT848'
-    noinputmodules="tv-bsdbt848 $noinputmodules"
-  fi
-  echores "$_tv_bsdbt848"
-fi #if freebsd || netbsd || openbsd || dragonfly
 
 
 echocheck "Video 4 Linux 2 TV interface"
@@ -2881,31 +2871,8 @@ fi
 echores "$_radio_v4l2"
 
 
-if freebsd || netbsd || openbsd || dragonfly &&
-  test "$_radio" = yes && test "$_radio_bsdbt848" = auto ; then
-echocheck "*BSD BrookTree 848 Radio interface"
-   _radio_bsdbt848=no
-    cat > $TMPC <<EOF
-#include <sys/types.h>
-$def_ioctl_bt848_h_name
-#ifdef IOCTL_BT848_H_NAME
-#include IOCTL_BT848_H_NAME
-#endif
-int main(void) { ioctl(0, RADIO_GETFREQ, 0); return 0; }
-EOF
-    cc_check && _radio_bsdbt848=yes
-echores "$_radio_bsdbt848"
-fi #if freebsd || netbsd || openbsd || dragonfly && _radio && _radio_bsdbt848
-
-if test "$_radio_bsdbt848" = yes ; then
-  def_radio_bsdbt848='#define CONFIG_RADIO_BSDBT848 1'
-else
-  def_radio_bsdbt848='#undef CONFIG_RADIO_BSDBT848'
-fi
-
-if test "$_radio_v4l2" = no &&
-   test "$_radio_bsdbt848" = no && test "$_radio" = yes ; then
-    die "Radio driver requires BSD BT848 or V4L2!"
+if test "$_radio_v4l2" = no && test "$_radio" = yes ; then
+    die "Radio driver requires V4L2!"
 fi
 
 echocheck "Video 4 Linux 2 MPEG PVR interface"
@@ -3038,6 +3005,11 @@ echores "$_lircc"
 
 #############################################################################
 
+if mingw32 ; then
+  # add this last, so that --libs from pkg-config can't override it
+  end_ldflags="$end_ldflags -mconsole"
+fi
+
 CFLAGS="$CFLAGS -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE"
 
 CXXFLAGS=" $CFLAGS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS"
@@ -3080,7 +3052,7 @@ CFLAGS   = $WARNFLAGS $ERRORFLAGS $WARN_CFLAGS $CFLAGS $extra_cflags
 CXXFLAGS = $WARNFLAGS $ERRORFLAGS $CXXFLAGS $extra_cflags $extra_cxxflags
 DEPFLAGS = $DEPFLAGS
 
-EXTRALIBS          = $extra_ldflags $_ld_static $_ld_lm $extra_libs $libs_mplayer
+EXTRALIBS = $extra_ldflags $_ld_static $_ld_lm $extra_libs $libs_mplayer $end_ldflags
 
 GETCH = $_getch
 TIMER = $_timer
@@ -3099,8 +3071,6 @@ NEED_SHMEM        = $need_shmem
 
 # features
 ALSA = $_alsa
-APPLE_IR = $_apple_ir
-APPLE_REMOTE = $_apple_remote
 AUDIO_INPUT = $_audio_input
 CACA = $_caca
 CDDA = $_cdda
@@ -3120,8 +3090,10 @@ GL = $_gl
 GL_COCOA = $_gl_cocoa
 GL_WIN32 = $_gl_win32
 GL_X11 = $_gl_x11
+GL_WAYLAND = $_gl_wayland
 HAVE_POSIX_SELECT = $_posix_select
 HAVE_SYS_MMAN_H = $_mman
+HAVE_AVUTIL_REFCOUNTING = $_avutil_has_refcounting
 JACK = $_jack
 JOYSTICK = $_joystick
 JPEG = $_jpeg
@@ -3135,11 +3107,11 @@ LCMS2 = $_lcms2
 LIBPOSTPROC = $libpostproc
 LIBAVDEVICE = $libavdevice
 LIBAVFILTER = $libavfilter
+VF_LAVFI = $vf_lavfi
 LIBSMBCLIENT = $_smb
 LIBQUVI = $_libquvi
 LIBTHEORA = $_theora
 LIRC = $_lirc
-MACOSX_FINDER = $_macosx_finder
 MACOSX_BUNDLE = $_macosx_bundle
 MNG = $_mng
 MPG123 = $_mpg123
@@ -3157,12 +3129,12 @@ RADIO_CAPTURE=$_radio_capture
 RSOUND = $_rsound
 STREAM_CACHE = $_stream_cache
 TV = $_tv
-TV_BSDBT848 = $_tv_bsdbt848
 TV_V4L2 = $_tv_v4l2
 VCD = $_vcd
 VDPAU = $_vdpau
 VSTREAM = $_vstream
 X11 = $_x11
+WAYLAND = $_wayland
 XV = $_xv
 
 # FFmpeg
@@ -3243,7 +3215,6 @@ $def_dl
 $def_dos_paths
 $def_iconv
 $def_macosx_bundle
-$def_macosx_finder
 $def_priority
 
 
@@ -3288,9 +3259,12 @@ $def_mpg123
 $def_libxmp
 $def_zlib
 
+$def_avutil_has_refcounting
+$def_avutil_has_qp_api
 $def_libpostproc
 $def_libavdevice
 $def_libavfilter
+$def_vf_lavfi
 
 
 /* Audio output drivers */
@@ -3311,20 +3285,14 @@ $def_libbs2b
 
 
 /* input */
-$def_apple_ir
-$def_apple_remote
-$def_ioctl_bt848_h_name
-$def_ioctl_meteor_h_name
 $def_joystick
 $def_lirc
 $def_lircc
 $def_pvr
 $def_radio
-$def_radio_bsdbt848
 $def_radio_capture
 $def_radio_v4l2
 $def_tv
-$def_tv_bsdbt848
 $def_tv_v4l2
 
 
@@ -3361,12 +3329,14 @@ $def_gl
 $def_gl_cocoa
 $def_gl_win32
 $def_gl_x11
+$def_gl_wayland
 $def_jpeg
 $def_mng
 $def_v4l2
 $def_vdpau
 $def_vm
 $def_x11
+$def_wayland
 $def_xdpms
 $def_xf86keysym
 $def_xinerama
@@ -3376,6 +3346,8 @@ $def_xv
 
 /* FFmpeg */
 $def_encoding
+$def_resampler
+$def_avresample_has_set_channel_mapping
 
 $def_fast_64bit
 $def_pthreads

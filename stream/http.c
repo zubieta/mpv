@@ -187,9 +187,9 @@ static int scast_streaming_start(stream_t *stream) {
   int metaint;
   scast_data_t *scast_data;
   HTTP_header_t *http_hdr = stream->streaming_ctrl->data;
-  int is_ultravox = strcasecmp(stream->streaming_ctrl->url->protocol, "unsv") == 0;
   if (!stream || stream->fd < 0 || !http_hdr)
     return -1;
+  int is_ultravox = strcasecmp(stream->streaming_ctrl->url->protocol, "unsv") == 0;
   if (is_ultravox)
     metaint = 0;
   else {
@@ -350,6 +350,7 @@ http_is_header_entire( HTTP_header_t *http_hdr ) {
 	if( http_hdr==NULL ) return -1;
 	if( http_hdr->buffer==NULL ) return 0; // empty
 
+	if(http_hdr->buffer_size > 128*1024) return 1;
 	if( strstr(http_hdr->buffer, "\r\n\r\n")==NULL &&
 	    strstr(http_hdr->buffer, "\n\n")==NULL ) return 0;
 	return 1;
@@ -414,12 +415,12 @@ http_response_parse( HTTP_header_t *http_hdr ) {
 	hdr_sep_len = 4;
 	ptr = strstr( http_hdr->buffer, "\r\n\r\n" );
 	if( ptr==NULL ) {
+		hdr_sep_len = 2;
 		ptr = strstr( http_hdr->buffer, "\n\n" );
 		if( ptr==NULL ) {
 			mp_msg(MSGT_NETWORK,MSGL_ERR,"Header may be incomplete. No CRLF CRLF found.\n");
-			return -1;
+			hdr_sep_len = 0;
 		}
-		hdr_sep_len = 2;
 	}
 	pos_hdr_sep = ptr-http_hdr->buffer;
 
@@ -429,7 +430,18 @@ http_response_parse( HTTP_header_t *http_hdr ) {
 		ptr = hdr_ptr;
 		while( *ptr!='\r' && *ptr!='\n' ) ptr++;
 		len = ptr-hdr_ptr;
-		if( len==0 ) break;
+		if (len == 0 || !memchr(hdr_ptr, ':', len)) {
+			mp_msg(MSGT_NETWORK, MSGL_ERR, "Broken response header, missing ':'\n");
+			pos_hdr_sep = ptr - http_hdr->buffer;
+			hdr_sep_len = 0;
+			break;
+		}
+		if (len > 16 && !strncasecmp(hdr_ptr + 4, "icy-metaint:", 12))
+		{
+			mp_msg(MSGT_NETWORK, MSGL_WARN, "Server sent a severely broken icy-metaint HTTP header!\n");
+			hdr_ptr += 4;
+			len -= 4;
+		}
 		field = realloc(field, len+1);
 		if( field==NULL ) {
 			mp_msg(MSGT_NETWORK,MSGL_ERR,"Memory allocation failed\n");

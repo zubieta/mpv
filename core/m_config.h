@@ -35,7 +35,7 @@ struct m_sub_options;
 // Config option
 struct m_config_option {
     struct m_config_option *next;
-    // Full name (ie option:subopt).
+    // Full name (ie option-subopt).
     char *name;
     // Option description.
     const struct m_option *opt;
@@ -64,13 +64,6 @@ struct m_profile {
     char **opts;
 };
 
-enum option_source {
-    // Set when parsing command line arguments.
-    M_COMMAND_LINE,
-    // Set when parsing from a config file.
-    M_CONFIG_FILE,
-};
-
 // Config object
 /** \ingroup Config */
 typedef struct m_config {
@@ -78,7 +71,6 @@ typedef struct m_config {
     /** This contains all options and suboptions.
      */
     struct m_config_option *opts;
-    enum option_source mode;
     // When options are set (via m_config_set_option or m_config_set_profile),
     // back up the old value (unless it's already backed up). Used for restoring
     // global options when per-file options are set.
@@ -105,6 +97,8 @@ void m_config_free(struct m_config *config);
 
 void m_config_enter_file_local(struct m_config *config);
 void m_config_leave_file_local(struct m_config *config);
+void m_config_mark_file_local(struct m_config *config, const char *opt);
+void m_config_mark_all_file_local(struct m_config *config);
 
 /*  Register some options to be used.
  *  \param config The config object.
@@ -114,7 +108,19 @@ void m_config_leave_file_local(struct m_config *config);
 int m_config_register_options(struct m_config *config,
                               const struct m_option *args);
 
-/*  Set an option.
+enum {
+    M_SETOPT_PRE_PARSE_ONLY = 1,    // Silently ignore non-M_OPT_PRE_PARSE opt.
+    M_SETOPT_CHECK_ONLY = 2,        // Don't set, just check name/value
+    M_SETOPT_FROM_CONFIG_FILE = 4,  // Reject M_OPT_NOCFG opt. (print error)
+};
+
+// Set the named option to the given string.
+// flags: combination of M_SETOPT_* flags (0 for normal operation)
+// Returns >= 0 on success, otherwise see OptionParserReturn.
+int m_config_set_option_ext(struct m_config *config, struct bstr name,
+                            struct bstr param, int flags);
+
+/*  Set an option. (Like: m_config_set_option_ext(config, name, param, 0))
  *  \param config The config object.
  *  \param name The option's name.
  *  \param param The value of the option, can be NULL.
@@ -127,18 +133,6 @@ static inline int m_config_set_option0(struct m_config *config,
                                        const char *name, const char *param)
 {
     return m_config_set_option(config, bstr0(name), bstr0(param));
-}
-
-/*  Check if an option setting is valid.
- *  Same as above m_config_set_option() but doesn't actually set anything.
- */
-int m_config_check_option(struct m_config *config, struct bstr name,
-                          struct bstr param);
-
-static inline int m_config_check_option0(struct m_config *config,
-                                         const char *name, const char *param)
-{
-    return m_config_check_option(config, bstr0(name), bstr0(param));
 }
 
 int m_config_parse_suboptions(struct m_config *config, char *name,
@@ -154,6 +148,13 @@ const struct m_option *m_config_get_option(const struct m_config *config,
 
 struct m_config_option *m_config_get_co(const struct m_config *config,
                                         struct bstr name);
+
+// Return a hint to the option parser whether a parameter is/may be required.
+// The option may still accept empty/non-empty parameters independent from
+// this, and this function is useful only for handling ambiguous options like
+// flags (e.g. "--a" is ok, "--a=yes" is also ok).
+// Returns: error code (<0), or number of expected params (0, 1)
+int m_config_option_requires_param(struct m_config *config, bstr name);
 
 /*  Print a list of all registered options.
  *  \param config The config object.
@@ -193,7 +194,7 @@ void m_profile_set_desc(struct m_profile *p, char *desc);
  *  \param val The option's value.
  */
 int m_config_set_profile_option(struct m_config *config, struct m_profile *p,
-                                char *name, char *val);
+                                bstr name, bstr val);
 
 /*  Enables profile usage
  *  Used by the config file parser when loading a profile.

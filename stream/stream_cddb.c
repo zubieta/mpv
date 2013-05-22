@@ -57,7 +57,7 @@
 #elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
 #include <sys/cdio.h>
 #elif defined(__MINGW32__) || defined(__CYGWIN__)
-#include <ddk/ntddcdrm.h>
+#include <ntddcdrm.h>
 #elif defined(__bsdi__)
 #include <dvd.h>
 #elif defined(__APPLE__) || defined(__DARWIN__)
@@ -879,14 +879,13 @@ cd_info_t *cddb_parse_xmcd(char *xmcd_file)
         // Ignore comments
         if (ptr[0] != '#') {
             // Search for the album title
-            if (xmcd_parse_dtitle(cd_info, ptr))
-                ;
-            // Search for the genre
-            else if (xmcd_parse_dgenre(cd_info, ptr))
-                ;
-            // Search for a track title
-            else if (xmcd_parse_ttitle(cd_info, ptr))
-                ;
+            if (!xmcd_parse_dtitle(cd_info, ptr)) {
+                // Search for the genre
+                if (!xmcd_parse_dgenre(cd_info, ptr)) {
+                    // Search for a track title
+                    xmcd_parse_ttitle(cd_info, ptr);
+                }
+            }
         }
         if (ptr2[1] == '\n')
             ptr2++;

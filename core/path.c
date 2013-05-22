@@ -31,6 +31,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <errno.h>
 #include "config.h"
 #include "core/mp_msg.h"
 #include "core/path.h"
@@ -82,26 +83,39 @@ char *mp_find_user_config_file(const char *filename)
     static char *config_dir = ".mpv";
 #endif
 #if defined(__MINGW32__) || defined(__CYGWIN__)
+    char *temp = NULL;
     char exedir[260];
+    /* Hack to get fonts etc. loaded outside of Cygwin environment. */
+    int i, imax = 0;
+    int len = (int)GetModuleFileNameA(NULL, exedir, 260);
+    for (i = 0; i < len; i++)
+        if (exedir[i] == '\\') {
+            exedir[i] = '/';
+            imax = i;
+        }
+    exedir[imax] = '\0';
+
+    if (filename)
+        temp = mp_path_join(NULL, bstr0(exedir), bstr0(filename));
+
+    if (temp && mp_path_exists(temp) && !mp_path_isdir(temp)) {
+        homedir = exedir;
+        config_dir = "";
+    }
+    else
 #endif
     if ((homedir = getenv("MPV_HOME")) != NULL) {
         config_dir = "";
     } else if ((homedir = getenv("HOME")) == NULL) {
 #if defined(__MINGW32__) || defined(__CYGWIN__)
-    /* Hack to get fonts etc. loaded outside of Cygwin environment. */
-        int i, imax = 0;
-        int len = (int)GetModuleFileNameA(NULL, exedir, 260);
-        for (i = 0; i < len; i++)
-            if (exedir[i] == '\\') {
-                exedir[i] = '/';
-                imax = i;
-            }
-        exedir[imax] = '\0';
         homedir = exedir;
 #else
         return NULL;
 #endif
     }
+#if defined(__MINGW32__) || defined(__CYGWIN__)
+    talloc_free(temp);
+#endif
 
     if (filename) {
         char * temp = mp_path_join(NULL, bstr0(homedir), bstr0(config_dir));
@@ -176,6 +190,19 @@ char *mp_path_join(void *talloc_ctx, struct bstr p1, struct bstr p2)
 
     return talloc_asprintf(talloc_ctx, "%.*s%s%.*s", BSTR_P(p1),
                            have_separator ? "" : "/", BSTR_P(p2));
+}
+
+char *mp_getcwd(void *talloc_ctx)
+{
+    char *wd = talloc_array(talloc_ctx, char, 20);
+    while (getcwd(wd, talloc_get_size(wd)) == NULL) {
+        if (errno != ERANGE) {
+            talloc_free(wd);
+            return NULL;
+        }
+        wd = talloc_realloc(talloc_ctx, wd, char, talloc_get_size(wd) * 2);
+    }
+    return wd;
 }
 
 bool mp_path_exists(const char *path)

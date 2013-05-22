@@ -34,6 +34,7 @@ static void checkvolume(struct mixer *mixer)
 
     if (mixer->softvol == SOFTVOL_AUTO) {
         mixer->softvol = mixer->ao->per_application_mixer
+                         || mixer->ao->no_persistent_volume
                          ? SOFTVOL_NO : SOFTVOL_YES;
     }
 
@@ -129,6 +130,7 @@ void mixer_setvolume(mixer_t *mixer, float l, float r)
     if (!mixer->ao || mixer->muted_using_volume)
         return;
     setvolume_internal(mixer, mixer->vol_l, mixer->vol_r);
+    mixer->user_set_volume = true;
 }
 
 void mixer_getbothvolume(mixer_t *mixer, float *b)
@@ -151,6 +153,7 @@ void mixer_setmute(struct mixer *mixer, bool mute)
         }
         mixer->muted = mute;
         mixer->muted_by_us = mute;
+        mixer->user_set_mute = true;
     }
 }
 
@@ -214,7 +217,7 @@ void mixer_setbalance(mixer_t *mixer, float val)
                            AF_CONTROL_PAN_BALANCE | AF_CONTROL_SET, &val))
         return;
 
-    if (val == 0 || mixer->ao->channels < 2)
+    if (val == 0 || mixer->ao->channels.num < 2)
         return;
 
     if (!(af_pan_balance = af_add(mixer->afilter, "pan"))) {
@@ -263,6 +266,8 @@ void mixer_reinit(struct mixer *mixer, struct ao *ao)
         mixer_setmute(mixer, true);
     if (mixer->balance != 0)
         mixer_setbalance(mixer, mixer->balance);
+    mixer->user_set_mute = false;
+    mixer->user_set_volume = false;
 }
 
 /* Called before uninitializing the audio output. The main purpose is to

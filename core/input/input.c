@@ -31,6 +31,9 @@
 #include <ctype.h>
 #include <assert.h>
 
+#include <libavutil/avstring.h>
+#include <libavutil/common.h>
+
 #include "osdep/io.h"
 #include "osdep/getch2.h"
 
@@ -38,8 +41,6 @@
 #include "core/mp_fifo.h"
 #include "keycodes.h"
 #include "osdep/timer.h"
-#include "libavutil/avstring.h"
-#include "libavutil/common.h"
 #include "core/mp_msg.h"
 #include "core/m_config.h"
 #include "core/m_option.h"
@@ -48,6 +49,7 @@
 #include "core/options.h"
 #include "core/bstr.h"
 #include "stream/stream.h"
+#include "core/mp_common.h"
 
 #include "joystick.h"
 
@@ -59,13 +61,7 @@
 #include <lirc/lircc.h>
 #endif
 
-#include "ar.h"
-
-#ifdef CONFIG_COCOA
-#include "osdep/cocoa_events.h"
-#endif
-
-#define MP_MAX_KEY_DOWN 32
+#define MP_MAX_KEY_DOWN 4
 
 struct cmd_bind {
     int input[MP_MAX_KEY_DOWN + 1];
@@ -94,6 +90,7 @@ struct key_name {
 #define ARG_STRING              { .type = {"", NULL, &m_option_type_string} }
 #define ARG_CHOICE(c)           { .type = {"", NULL, &m_option_type_choice,    \
                                            M_CHOICES(c)} }
+#define ARG_TIME                { .type = {"", NULL, &m_option_type_time} }
 
 #define OARG_FLOAT(def)         { .type = {"", NULL, &m_option_type_float},    \
                                   .optional = true, .v.f = def }
@@ -119,7 +116,7 @@ static const mp_cmd_t mp_cmds[] = {
   { MP_CMD_RADIO_STEP_FREQ, "radio_step_freq", {ARG_FLOAT } },
 
   { MP_CMD_SEEK, "seek", {
-      ARG_FLOAT,
+      ARG_TIME,
       OARG_CHOICE(0, ({"relative", 0},          {"0", 0},
                       {"absolute-percent", 1},  {"1", 1},
                       {"absolute", 2},          {"2", 2})),
@@ -127,11 +124,12 @@ static const mp_cmd_t mp_cmds[] = {
                       {"exact", 1},             {"1", 1},
                       {"keyframes", -1},        {"-1", -1})),
   }},
-  { MP_CMD_EDL_MARK, "edl_mark", },
   { MP_CMD_SPEED_MULT, "speed_mult", { ARG_FLOAT } },
   { MP_CMD_QUIT, "quit", { OARG_INT(0) } },
+  { MP_CMD_QUIT_WATCH_LATER, "quit_watch_later", },
   { MP_CMD_STOP, "stop", },
   { MP_CMD_FRAME_STEP, "frame_step", },
+  { MP_CMD_FRAME_BACK_STEP, "frame_back_step", },
   { MP_CMD_PLAYLIST_NEXT, "playlist_next", {
       OARG_CHOICE(0, ({"weak", 0},              {"0", 0},
                       {"force", 1},             {"1", 1})),
@@ -200,8 +198,11 @@ static const mp_cmd_t mp_cmds[] = {
   { MP_CMD_AF_CLR, "af_clr", },
   { MP_CMD_AF_CMDLINE, "af_cmdline", { ARG_STRING, ARG_STRING } },
 
+  { MP_CMD_VF, "vf", { ARG_STRING, ARG_STRING } },
+
   { MP_CMD_SHOW_CHAPTERS, "show_chapters", },
   { MP_CMD_SHOW_TRACKS, "show_tracks", },
+  { MP_CMD_SHOW_PLAYLIST, "show_playlist", },
 
   { MP_CMD_VO_CMDLINE, "vo_cmdline", { ARG_STRING } },
 
@@ -222,10 +223,9 @@ static const struct legacy_cmd legacy_cmds[] = {
     {"audio_delay",             "add audio-delay"},
     {"switch_audio",            "cycle audio"},
     {"balance",                 "add balance"},
-    {"vo_fullscreen",           "no-osd cycle fullscreen"},
+    {"vo_fullscreen",           "cycle fullscreen"},
     {"panscan",                 "add panscan"},
     {"vo_ontop",                "cycle ontop"},
-    {"vo_rootwin",              "cycle rootwin"},
     {"vo_border",               "cycle border"},
     {"frame_drop",              "cycle framedrop"},
     {"gamma",                   "add gamma"},
@@ -272,169 +272,156 @@ static const struct legacy_cmd legacy_cmds[] = {
 static const struct key_name key_names[] = {
   { ' ', "SPACE" },
   { '#', "SHARP" },
-  { KEY_ENTER, "ENTER" },
-  { KEY_TAB, "TAB" },
-  { KEY_BACKSPACE, "BS" },
-  { KEY_DELETE, "DEL" },
-  { KEY_INSERT, "INS" },
-  { KEY_HOME, "HOME" },
-  { KEY_END, "END" },
-  { KEY_PAGE_UP, "PGUP" },
-  { KEY_PAGE_DOWN, "PGDWN" },
-  { KEY_ESC, "ESC" },
-  { KEY_PRINT, "PRINT" },
-  { KEY_RIGHT, "RIGHT" },
-  { KEY_LEFT, "LEFT" },
-  { KEY_DOWN, "DOWN" },
-  { KEY_UP, "UP" },
-  { KEY_F+1, "F1" },
-  { KEY_F+2, "F2" },
-  { KEY_F+3, "F3" },
-  { KEY_F+4, "F4" },
-  { KEY_F+5, "F5" },
-  { KEY_F+6, "F6" },
-  { KEY_F+7, "F7" },
-  { KEY_F+8, "F8" },
-  { KEY_F+9, "F9" },
-  { KEY_F+10, "F10" },
-  { KEY_F+11, "F11" },
-  { KEY_F+12, "F12" },
-  { KEY_KP0, "KP0" },
-  { KEY_KP1, "KP1" },
-  { KEY_KP2, "KP2" },
-  { KEY_KP3, "KP3" },
-  { KEY_KP4, "KP4" },
-  { KEY_KP5, "KP5" },
-  { KEY_KP6, "KP6" },
-  { KEY_KP7, "KP7" },
-  { KEY_KP8, "KP8" },
-  { KEY_KP9, "KP9" },
-  { KEY_KPDEL, "KP_DEL" },
-  { KEY_KPDEC, "KP_DEC" },
-  { KEY_KPINS, "KP_INS" },
-  { KEY_KPENTER, "KP_ENTER" },
-  { MOUSE_BTN0, "MOUSE_BTN0" },
-  { MOUSE_BTN1, "MOUSE_BTN1" },
-  { MOUSE_BTN2, "MOUSE_BTN2" },
-  { MOUSE_BTN3, "MOUSE_BTN3" },
-  { MOUSE_BTN4, "MOUSE_BTN4" },
-  { MOUSE_BTN5, "MOUSE_BTN5" },
-  { MOUSE_BTN6, "MOUSE_BTN6" },
-  { MOUSE_BTN7, "MOUSE_BTN7" },
-  { MOUSE_BTN8, "MOUSE_BTN8" },
-  { MOUSE_BTN9, "MOUSE_BTN9" },
-  { MOUSE_BTN10, "MOUSE_BTN10" },
-  { MOUSE_BTN11, "MOUSE_BTN11" },
-  { MOUSE_BTN12, "MOUSE_BTN12" },
-  { MOUSE_BTN13, "MOUSE_BTN13" },
-  { MOUSE_BTN14, "MOUSE_BTN14" },
-  { MOUSE_BTN15, "MOUSE_BTN15" },
-  { MOUSE_BTN16, "MOUSE_BTN16" },
-  { MOUSE_BTN17, "MOUSE_BTN17" },
-  { MOUSE_BTN18, "MOUSE_BTN18" },
-  { MOUSE_BTN19, "MOUSE_BTN19" },
-  { MOUSE_BTN0_DBL, "MOUSE_BTN0_DBL" },
-  { MOUSE_BTN1_DBL, "MOUSE_BTN1_DBL" },
-  { MOUSE_BTN2_DBL, "MOUSE_BTN2_DBL" },
-  { MOUSE_BTN3_DBL, "MOUSE_BTN3_DBL" },
-  { MOUSE_BTN4_DBL, "MOUSE_BTN4_DBL" },
-  { MOUSE_BTN5_DBL, "MOUSE_BTN5_DBL" },
-  { MOUSE_BTN6_DBL, "MOUSE_BTN6_DBL" },
-  { MOUSE_BTN7_DBL, "MOUSE_BTN7_DBL" },
-  { MOUSE_BTN8_DBL, "MOUSE_BTN8_DBL" },
-  { MOUSE_BTN9_DBL, "MOUSE_BTN9_DBL" },
-  { MOUSE_BTN10_DBL, "MOUSE_BTN10_DBL" },
-  { MOUSE_BTN11_DBL, "MOUSE_BTN11_DBL" },
-  { MOUSE_BTN12_DBL, "MOUSE_BTN12_DBL" },
-  { MOUSE_BTN13_DBL, "MOUSE_BTN13_DBL" },
-  { MOUSE_BTN14_DBL, "MOUSE_BTN14_DBL" },
-  { MOUSE_BTN15_DBL, "MOUSE_BTN15_DBL" },
-  { MOUSE_BTN16_DBL, "MOUSE_BTN16_DBL" },
-  { MOUSE_BTN17_DBL, "MOUSE_BTN17_DBL" },
-  { MOUSE_BTN18_DBL, "MOUSE_BTN18_DBL" },
-  { MOUSE_BTN19_DBL, "MOUSE_BTN19_DBL" },
-  { JOY_AXIS1_MINUS, "JOY_UP" },
-  { JOY_AXIS1_PLUS, "JOY_DOWN" },
-  { JOY_AXIS0_MINUS, "JOY_LEFT" },
-  { JOY_AXIS0_PLUS, "JOY_RIGHT" },
+  { MP_KEY_ENTER, "ENTER" },
+  { MP_KEY_TAB, "TAB" },
+  { MP_KEY_BACKSPACE, "BS" },
+  { MP_KEY_DELETE, "DEL" },
+  { MP_KEY_INSERT, "INS" },
+  { MP_KEY_HOME, "HOME" },
+  { MP_KEY_END, "END" },
+  { MP_KEY_PAGE_UP, "PGUP" },
+  { MP_KEY_PAGE_DOWN, "PGDWN" },
+  { MP_KEY_ESC, "ESC" },
+  { MP_KEY_PRINT, "PRINT" },
+  { MP_KEY_RIGHT, "RIGHT" },
+  { MP_KEY_LEFT, "LEFT" },
+  { MP_KEY_DOWN, "DOWN" },
+  { MP_KEY_UP, "UP" },
+  { MP_KEY_F+1, "F1" },
+  { MP_KEY_F+2, "F2" },
+  { MP_KEY_F+3, "F3" },
+  { MP_KEY_F+4, "F4" },
+  { MP_KEY_F+5, "F5" },
+  { MP_KEY_F+6, "F6" },
+  { MP_KEY_F+7, "F7" },
+  { MP_KEY_F+8, "F8" },
+  { MP_KEY_F+9, "F9" },
+  { MP_KEY_F+10, "F10" },
+  { MP_KEY_F+11, "F11" },
+  { MP_KEY_F+12, "F12" },
+  { MP_KEY_KP0, "KP0" },
+  { MP_KEY_KP1, "KP1" },
+  { MP_KEY_KP2, "KP2" },
+  { MP_KEY_KP3, "KP3" },
+  { MP_KEY_KP4, "KP4" },
+  { MP_KEY_KP5, "KP5" },
+  { MP_KEY_KP6, "KP6" },
+  { MP_KEY_KP7, "KP7" },
+  { MP_KEY_KP8, "KP8" },
+  { MP_KEY_KP9, "KP9" },
+  { MP_KEY_KPDEL, "KP_DEL" },
+  { MP_KEY_KPDEC, "KP_DEC" },
+  { MP_KEY_KPINS, "KP_INS" },
+  { MP_KEY_KPENTER, "KP_ENTER" },
+  { MP_MOUSE_BTN0, "MOUSE_BTN0" },
+  { MP_MOUSE_BTN1, "MOUSE_BTN1" },
+  { MP_MOUSE_BTN2, "MOUSE_BTN2" },
+  { MP_MOUSE_BTN3, "MOUSE_BTN3" },
+  { MP_MOUSE_BTN4, "MOUSE_BTN4" },
+  { MP_MOUSE_BTN5, "MOUSE_BTN5" },
+  { MP_MOUSE_BTN6, "MOUSE_BTN6" },
+  { MP_MOUSE_BTN7, "MOUSE_BTN7" },
+  { MP_MOUSE_BTN8, "MOUSE_BTN8" },
+  { MP_MOUSE_BTN9, "MOUSE_BTN9" },
+  { MP_MOUSE_BTN10, "MOUSE_BTN10" },
+  { MP_MOUSE_BTN11, "MOUSE_BTN11" },
+  { MP_MOUSE_BTN12, "MOUSE_BTN12" },
+  { MP_MOUSE_BTN13, "MOUSE_BTN13" },
+  { MP_MOUSE_BTN14, "MOUSE_BTN14" },
+  { MP_MOUSE_BTN15, "MOUSE_BTN15" },
+  { MP_MOUSE_BTN16, "MOUSE_BTN16" },
+  { MP_MOUSE_BTN17, "MOUSE_BTN17" },
+  { MP_MOUSE_BTN18, "MOUSE_BTN18" },
+  { MP_MOUSE_BTN19, "MOUSE_BTN19" },
+  { MP_MOUSE_BTN0_DBL, "MOUSE_BTN0_DBL" },
+  { MP_MOUSE_BTN1_DBL, "MOUSE_BTN1_DBL" },
+  { MP_MOUSE_BTN2_DBL, "MOUSE_BTN2_DBL" },
+  { MP_MOUSE_BTN3_DBL, "MOUSE_BTN3_DBL" },
+  { MP_MOUSE_BTN4_DBL, "MOUSE_BTN4_DBL" },
+  { MP_MOUSE_BTN5_DBL, "MOUSE_BTN5_DBL" },
+  { MP_MOUSE_BTN6_DBL, "MOUSE_BTN6_DBL" },
+  { MP_MOUSE_BTN7_DBL, "MOUSE_BTN7_DBL" },
+  { MP_MOUSE_BTN8_DBL, "MOUSE_BTN8_DBL" },
+  { MP_MOUSE_BTN9_DBL, "MOUSE_BTN9_DBL" },
+  { MP_MOUSE_BTN10_DBL, "MOUSE_BTN10_DBL" },
+  { MP_MOUSE_BTN11_DBL, "MOUSE_BTN11_DBL" },
+  { MP_MOUSE_BTN12_DBL, "MOUSE_BTN12_DBL" },
+  { MP_MOUSE_BTN13_DBL, "MOUSE_BTN13_DBL" },
+  { MP_MOUSE_BTN14_DBL, "MOUSE_BTN14_DBL" },
+  { MP_MOUSE_BTN15_DBL, "MOUSE_BTN15_DBL" },
+  { MP_MOUSE_BTN16_DBL, "MOUSE_BTN16_DBL" },
+  { MP_MOUSE_BTN17_DBL, "MOUSE_BTN17_DBL" },
+  { MP_MOUSE_BTN18_DBL, "MOUSE_BTN18_DBL" },
+  { MP_MOUSE_BTN19_DBL, "MOUSE_BTN19_DBL" },
+  { MP_JOY_AXIS1_MINUS, "JOY_UP" },
+  { MP_JOY_AXIS1_PLUS, "JOY_DOWN" },
+  { MP_JOY_AXIS0_MINUS, "JOY_LEFT" },
+  { MP_JOY_AXIS0_PLUS, "JOY_RIGHT" },
 
-  { JOY_AXIS0_PLUS, "JOY_AXIS0_PLUS" },
-  { JOY_AXIS0_MINUS, "JOY_AXIS0_MINUS" },
-  { JOY_AXIS1_PLUS, "JOY_AXIS1_PLUS" },
-  { JOY_AXIS1_MINUS, "JOY_AXIS1_MINUS" },
-  { JOY_AXIS2_PLUS, "JOY_AXIS2_PLUS" },
-  { JOY_AXIS2_MINUS, "JOY_AXIS2_MINUS" },
-  { JOY_AXIS3_PLUS, "JOY_AXIS3_PLUS" },
-  { JOY_AXIS3_MINUS, "JOY_AXIS3_MINUS" },
-  { JOY_AXIS4_PLUS, "JOY_AXIS4_PLUS" },
-  { JOY_AXIS4_MINUS, "JOY_AXIS4_MINUS" },
-  { JOY_AXIS5_PLUS, "JOY_AXIS5_PLUS" },
-  { JOY_AXIS5_MINUS, "JOY_AXIS5_MINUS" },
-  { JOY_AXIS6_PLUS, "JOY_AXIS6_PLUS" },
-  { JOY_AXIS6_MINUS, "JOY_AXIS6_MINUS" },
-  { JOY_AXIS7_PLUS, "JOY_AXIS7_PLUS" },
-  { JOY_AXIS7_MINUS, "JOY_AXIS7_MINUS" },
-  { JOY_AXIS8_PLUS, "JOY_AXIS8_PLUS" },
-  { JOY_AXIS8_MINUS, "JOY_AXIS8_MINUS" },
-  { JOY_AXIS9_PLUS, "JOY_AXIS9_PLUS" },
-  { JOY_AXIS9_MINUS, "JOY_AXIS9_MINUS" },
+  { MP_JOY_AXIS0_PLUS,  "JOY_AXIS0_PLUS" },
+  { MP_JOY_AXIS0_MINUS, "JOY_AXIS0_MINUS" },
+  { MP_JOY_AXIS1_PLUS,  "JOY_AXIS1_PLUS" },
+  { MP_JOY_AXIS1_MINUS, "JOY_AXIS1_MINUS" },
+  { MP_JOY_AXIS2_PLUS,  "JOY_AXIS2_PLUS" },
+  { MP_JOY_AXIS2_MINUS, "JOY_AXIS2_MINUS" },
+  { MP_JOY_AXIS3_PLUS,  "JOY_AXIS3_PLUS" },
+  { MP_JOY_AXIS3_MINUS, "JOY_AXIS3_MINUS" },
+  { MP_JOY_AXIS4_PLUS,  "JOY_AXIS4_PLUS" },
+  { MP_JOY_AXIS4_MINUS, "JOY_AXIS4_MINUS" },
+  { MP_JOY_AXIS5_PLUS,  "JOY_AXIS5_PLUS" },
+  { MP_JOY_AXIS5_MINUS, "JOY_AXIS5_MINUS" },
+  { MP_JOY_AXIS6_PLUS,  "JOY_AXIS6_PLUS" },
+  { MP_JOY_AXIS6_MINUS, "JOY_AXIS6_MINUS" },
+  { MP_JOY_AXIS7_PLUS,  "JOY_AXIS7_PLUS" },
+  { MP_JOY_AXIS7_MINUS, "JOY_AXIS7_MINUS" },
+  { MP_JOY_AXIS8_PLUS,  "JOY_AXIS8_PLUS" },
+  { MP_JOY_AXIS8_MINUS, "JOY_AXIS8_MINUS" },
+  { MP_JOY_AXIS9_PLUS,  "JOY_AXIS9_PLUS" },
+  { MP_JOY_AXIS9_MINUS, "JOY_AXIS9_MINUS" },
 
-  { JOY_BTN0, "JOY_BTN0" },
-  { JOY_BTN1, "JOY_BTN1" },
-  { JOY_BTN2, "JOY_BTN2" },
-  { JOY_BTN3, "JOY_BTN3" },
-  { JOY_BTN4, "JOY_BTN4" },
-  { JOY_BTN5, "JOY_BTN5" },
-  { JOY_BTN6, "JOY_BTN6" },
-  { JOY_BTN7, "JOY_BTN7" },
-  { JOY_BTN8, "JOY_BTN8" },
-  { JOY_BTN9, "JOY_BTN9" },
+  { MP_JOY_BTN0,        "JOY_BTN0" },
+  { MP_JOY_BTN1,        "JOY_BTN1" },
+  { MP_JOY_BTN2,        "JOY_BTN2" },
+  { MP_JOY_BTN3,        "JOY_BTN3" },
+  { MP_JOY_BTN4,        "JOY_BTN4" },
+  { MP_JOY_BTN5,        "JOY_BTN5" },
+  { MP_JOY_BTN6,        "JOY_BTN6" },
+  { MP_JOY_BTN7,        "JOY_BTN7" },
+  { MP_JOY_BTN8,        "JOY_BTN8" },
+  { MP_JOY_BTN9,        "JOY_BTN9" },
 
-  { AR_PLAY, "AR_PLAY" },
-  { AR_PLAY_HOLD, "AR_PLAY_HOLD" },
-  { AR_NEXT, "AR_NEXT" },
-  { AR_NEXT_HOLD, "AR_NEXT_HOLD" },
-  { AR_PREV, "AR_PREV" },
-  { AR_PREV_HOLD, "AR_PREV_HOLD" },
-  { AR_MENU, "AR_MENU" },
-  { AR_MENU_HOLD, "AR_MENU_HOLD" },
-  { AR_VUP, "AR_VUP" },
-  { AR_VDOWN, "AR_VDOWN" },
-
-  { KEY_POWER, "POWER" },
-  { KEY_MENU, "MENU" },
-  { KEY_PLAY, "PLAY" },
-  { KEY_PAUSE, "PAUSE" },
-  { KEY_PLAYPAUSE, "PLAYPAUSE" },
-  { KEY_STOP, "STOP" },
-  { KEY_FORWARD, "FORWARD" },
-  { KEY_REWIND, "REWIND" },
-  { KEY_NEXT, "NEXT" },
-  { KEY_PREV, "PREV" },
-  { KEY_VOLUME_UP, "VOLUME_UP" },
-  { KEY_VOLUME_DOWN, "VOLUME_DOWN" },
-  { KEY_MUTE, "MUTE" },
+  { MP_KEY_POWER,       "POWER" },
+  { MP_KEY_MENU,        "MENU" },
+  { MP_KEY_PLAY,        "PLAY" },
+  { MP_KEY_PAUSE,       "PAUSE" },
+  { MP_KEY_PLAYPAUSE,   "PLAYPAUSE" },
+  { MP_KEY_STOP,        "STOP" },
+  { MP_KEY_FORWARD,     "FORWARD" },
+  { MP_KEY_REWIND,      "REWIND" },
+  { MP_KEY_NEXT,        "NEXT" },
+  { MP_KEY_PREV,        "PREV" },
+  { MP_KEY_VOLUME_UP,   "VOLUME_UP" },
+  { MP_KEY_VOLUME_DOWN, "VOLUME_DOWN" },
+  { MP_KEY_MUTE,        "MUTE" },
 
   // These are kept for backward compatibility
-  { KEY_PAUSE, "XF86_PAUSE" },
-  { KEY_STOP, "XF86_STOP" },
-  { KEY_PREV, "XF86_PREV" },
-  { KEY_NEXT, "XF86_NEXT" },
+  { MP_KEY_PAUSE,   "XF86_PAUSE" },
+  { MP_KEY_STOP,    "XF86_STOP" },
+  { MP_KEY_PREV,    "XF86_PREV" },
+  { MP_KEY_NEXT,    "XF86_NEXT" },
 
-  { KEY_CLOSE_WIN, "CLOSE_WIN" },
+  { MP_KEY_CLOSE_WIN, "CLOSE_WIN" },
 
   { 0, NULL }
 };
 
 struct key_name modifier_names[] = {
-    { KEY_MODIFIER_SHIFT, "Shift" },
-    { KEY_MODIFIER_CTRL,  "Ctrl" },
-    { KEY_MODIFIER_ALT,   "Alt" },
-    { KEY_MODIFIER_META,  "Meta" },
+    { MP_KEY_MODIFIER_SHIFT, "Shift" },
+    { MP_KEY_MODIFIER_CTRL,  "Ctrl" },
+    { MP_KEY_MODIFIER_ALT,   "Alt" },
+    { MP_KEY_MODIFIER_META,  "Meta" },
     { 0 }
 };
-
-#define KEY_MODIFIER_MASK (KEY_MODIFIER_SHIFT | KEY_MODIFIER_CTRL | KEY_MODIFIER_ALT | KEY_MODIFIER_META)
 
 #ifndef MP_MAX_KEY_FD
 #define MP_MAX_KEY_FD 10
@@ -522,27 +509,27 @@ int async_quit_request;
 static int print_key_list(m_option_t *cfg, char *optname, char *optparam);
 static int print_cmd_list(m_option_t *cfg, char *optname, char *optparam);
 
+#define OPT_BASE_STRUCT struct MPOpts
+
 // Our command line options
 static const m_option_t input_conf[] = {
-    OPT_STRING("conf", input.config_file, CONF_GLOBAL, OPTDEF_STR("input.conf")),
+    OPT_STRING("conf", input.config_file, CONF_GLOBAL),
     OPT_INT("ar-delay", input.ar_delay, CONF_GLOBAL),
     OPT_INT("ar-rate", input.ar_rate, CONF_GLOBAL),
     { "keylist", print_key_list, CONF_TYPE_PRINT_FUNC, CONF_GLOBAL | CONF_NOCFG },
     { "cmdlist", print_cmd_list, CONF_TYPE_PRINT_FUNC, CONF_GLOBAL | CONF_NOCFG },
     OPT_STRING("js-dev", input.js_dev, CONF_GLOBAL),
-    OPT_STRING("ar-dev", input.ar_dev, CONF_GLOBAL),
     OPT_STRING("file", input.in_file, CONF_GLOBAL),
-    OPT_MAKE_FLAGS("default-bindings", input.default_bindings, CONF_GLOBAL),
-    OPT_MAKE_FLAGS("test", input.test, CONF_GLOBAL),
+    OPT_FLAG("default-bindings", input.default_bindings, CONF_GLOBAL),
+    OPT_FLAG("test", input.test, CONF_GLOBAL),
     { NULL, NULL, 0, 0, 0, 0, NULL}
 };
 
 static const m_option_t mp_input_opts[] = {
     { "input", (void *)&input_conf, CONF_TYPE_SUBCONFIG, 0, 0, 0, NULL},
-    OPT_MAKE_FLAGS("joystick", input.use_joystick, CONF_GLOBAL),
-    OPT_MAKE_FLAGS("lirc", input.use_lirc, CONF_GLOBAL),
-    OPT_MAKE_FLAGS("lircc", input.use_lircc, CONF_GLOBAL),
-    OPT_MAKE_FLAGS("ar", input.use_ar, CONF_GLOBAL),
+    OPT_FLAG("joystick", input.use_joystick, CONF_GLOBAL),
+    OPT_FLAG("lirc", input.use_lirc, CONF_GLOBAL),
+    OPT_FLAG("lircc", input.use_lircc, CONF_GLOBAL),
     { NULL, NULL, 0, 0, 0, 0, NULL}
 };
 
@@ -551,17 +538,6 @@ static int default_cmd_func(int fd, char *buf, int l);
 static const char builtin_input_conf[] =
 #include "core/input/input_conf.h"
 ;
-
-// Encode the unicode codepoint as UTF-8, and append to the end of the
-// talloc'ed buffer.
-static char *append_utf8_buffer(char *buffer, uint32_t codepoint)
-{
-    char data[8];
-    uint8_t tmp;
-    char *output = data;
-    PUT_UTF8(codepoint, tmp, *output++ = tmp;);
-    return talloc_strndup_append_buffer(buffer, data, output - data);
-}
 
 static char *get_key_name(int key, char *ret)
 {
@@ -579,7 +555,7 @@ static char *get_key_name(int key, char *ret)
 
     // printable, and valid unicode range
     if (key >= 32 && key <= 0x10FFFF)
-        return append_utf8_buffer(ret, key);
+        return mp_append_utf8_buffer(ret, key);
 
     // Print the hex key code
     return talloc_asprintf_append_buffer(ret, "%#-8x", key);
@@ -591,7 +567,7 @@ static char *get_key_combo_name(int *keys, int max)
     while (1) {
         ret = get_key_name(*keys, ret);
         if (--max && *++keys)
-            talloc_asprintf_append_buffer(ret, "-");
+            ret = talloc_asprintf_append_buffer(ret, "-");
         else
             break;
     }
@@ -785,48 +761,6 @@ static bool eat_token(bstr *str, const char *tok)
     return false;
 }
 
-static bool append_escape(bstr *code, char **str)
-{
-    if (code->len < 1)
-        return false;
-    char replace = 0;
-    switch (code->start[0]) {
-    case '"':  replace = '"';  break;
-    case '\\': replace = '\\'; break;
-    case 'b':  replace = '\b'; break;
-    case 'f':  replace = '\f'; break;
-    case 'n':  replace = '\n'; break;
-    case 'r':  replace = '\r'; break;
-    case 't':  replace = '\t'; break;
-    case 'e':  replace = '\x1b'; break;
-    case '\'': replace = '\''; break;
-    }
-    if (replace) {
-        *str = talloc_strndup_append_buffer(*str, &replace, 1);
-        *code = bstr_cut(*code, 1);
-        return true;
-    }
-    if (code->start[0] == 'x' && code->len >= 3) {
-        bstr num = bstr_splice(*code, 1, 3);
-        char c = bstrtoll(num, &num, 16);
-        if (!num.len)
-            return false;
-        *str = talloc_strndup_append_buffer(*str, &c, 1);
-        *code = bstr_cut(*code, 3);
-        return true;
-    }
-    if (code->start[0] == 'u' && code->len >= 5) {
-        bstr num = bstr_splice(*code, 1, 5);
-        int c = bstrtoll(num, &num, 16);
-        if (num.len)
-            return false;
-        *str = append_utf8_buffer(*str, c);
-        *code = bstr_cut(*code, 5);
-        return true;
-    }
-    return false;
-}
-
 static bool read_escaped_string(void *talloc_ctx, bstr *str, bstr *literal)
 {
     bstr t = *str;
@@ -836,7 +770,7 @@ static bool read_escaped_string(void *talloc_ctx, bstr *str, bstr *literal)
             break;
         if (t.start[0] == '\\') {
             t = bstr_cut(t, 1);
-            if (!append_escape(&t, &new))
+            if (!mp_parse_escape(&t, &new))
                 goto error;
         } else {
             new = talloc_strndup_append_buffer(new, t.start, 1);
@@ -856,19 +790,10 @@ mp_cmd_t *mp_input_parse_cmd(bstr str, const char *loc)
 {
     int pausing = 0;
     int on_osd = MP_ON_OSD_AUTO;
+    bool raw_args = false;
     struct mp_cmd *cmd = NULL;
     bstr start = str;
     void *tmp = talloc_new(NULL);
-
-    if (eat_token(&str, "pausing")) {
-        pausing = 1;
-    } else if (eat_token(&str, "pausing_keep")) {
-        pausing = 2;
-    } else if (eat_token(&str, "pausing_toggle")) {
-        pausing = 3;
-    } else if (eat_token(&str, "pausing_keep_force")) {
-        pausing = 4;
-    }
 
     str = bstr_lstrip(str);
     for (const struct legacy_cmd *entry = legacy_cmds; entry->old; entry++) {
@@ -876,7 +801,7 @@ mp_cmd_t *mp_input_parse_cmd(bstr str, const char *loc)
         if (bstrcasecmp(bstr_splice(str, 0, old_len),
                         (bstr) {(char *)entry->old, old_len}) == 0)
         {
-            mp_tmsg(MSGT_INPUT, MSGL_V, "Warning: command '%s' is "
+            mp_tmsg(MSGT_INPUT, MSGL_WARN, "Warning: command '%s' is "
                     "deprecated, replaced with '%s' at %s.\n",
                     entry->old, entry->new, loc);
             bstr s = bstr_cut(str, old_len);
@@ -886,16 +811,32 @@ mp_cmd_t *mp_input_parse_cmd(bstr str, const char *loc)
         }
     }
 
-    if (eat_token(&str, "no-osd")) {
-        on_osd = MP_ON_OSD_NO;
-    } else if (eat_token(&str, "osd-bar")) {
-        on_osd = MP_ON_OSD_BAR;
-    } else if (eat_token(&str, "osd-msg")) {
-        on_osd = MP_ON_OSD_MSG;
-    } else if (eat_token(&str, "osd-msg-bar")) {
-        on_osd = MP_ON_OSD_MSG | MP_ON_OSD_BAR;
-    } else if (eat_token(&str, "osd-auto")) {
-        // default
+    while (1) {
+        if (eat_token(&str, "pausing")) {
+            pausing = 1;
+        } else if (eat_token(&str, "pausing_keep")) {
+            pausing = 2;
+        } else if (eat_token(&str, "pausing_toggle")) {
+            pausing = 3;
+        } else if (eat_token(&str, "pausing_keep_force")) {
+            pausing = 4;
+        } else if (eat_token(&str, "no-osd")) {
+            on_osd = MP_ON_OSD_NO;
+        } else if (eat_token(&str, "osd-bar")) {
+            on_osd = MP_ON_OSD_BAR;
+        } else if (eat_token(&str, "osd-msg")) {
+            on_osd = MP_ON_OSD_MSG;
+        } else if (eat_token(&str, "osd-msg-bar")) {
+            on_osd = MP_ON_OSD_MSG | MP_ON_OSD_BAR;
+        } else if (eat_token(&str, "osd-auto")) {
+            // default
+        } else if (eat_token(&str, "raw")) {
+            raw_args = true;
+        } else if (eat_token(&str, "expand-properties")) {
+            // default
+        } else {
+            break;
+        }
     }
 
     int cmd_idx = 0;
@@ -915,6 +856,7 @@ mp_cmd_t *mp_input_parse_cmd(bstr str, const char *loc)
     *cmd = mp_cmds[cmd_idx];
     cmd->pausing = pausing;
     cmd->on_osd = on_osd;
+    cmd->raw_args = raw_args;
 
     for (int i = 0; i < MP_CMD_MAX_ARGS; i++) {
         struct mp_cmd_arg *cmdarg = &cmd->args[i];
@@ -923,9 +865,7 @@ mp_cmd_t *mp_input_parse_cmd(bstr str, const char *loc)
         cmd->nargs++;
         str = bstr_lstrip(str);
         bstr arg = {0};
-        if (cmdarg->type.type == &m_option_type_string &&
-            bstr_eatstart0(&str, "\""))
-        {
+        if (bstr_eatstart0(&str, "\"")) {
             if (!read_escaped_string(tmp, &str, &arg)) {
                 mp_tmsg(MSGT_INPUT, MSGL_ERR, "Command %s: argument %d "
                         "has broken string escapes.\n", cmd->name, i + 1);
@@ -1212,11 +1152,9 @@ static struct cmd_bind *section_find_bind_for_key(struct input_ctx *ictx,
     return bs->cmd_binds ? find_bind_for_key(bs->cmd_binds, n, keys) : NULL;
 }
 
-static mp_cmd_t *get_cmd_from_keys(struct input_ctx *ictx, int n, int *keys)
+static struct cmd_bind *find_any_bind_for_key(struct input_ctx *ictx,
+                                              int n, int *keys)
 {
-    if (ictx->test)
-        return handle_test(ictx, n, keys);
-
     struct cmd_bind *cmd
         = section_find_bind_for_key(ictx, false, ictx->section, n, keys);
     if (ictx->default_bindings && cmd == NULL)
@@ -1226,6 +1164,20 @@ static mp_cmd_t *get_cmd_from_keys(struct input_ctx *ictx, int n, int *keys)
             cmd = section_find_bind_for_key(ictx, false, "default", n, keys);
         if (ictx->default_bindings && cmd == NULL)
             cmd = section_find_bind_for_key(ictx, true, "default", n, keys);
+    }
+    return cmd;
+}
+
+static mp_cmd_t *get_cmd_from_keys(struct input_ctx *ictx, int n, int *keys)
+{
+    if (ictx->test)
+        return handle_test(ictx, n, keys);
+
+    struct cmd_bind *cmd = find_any_bind_for_key(ictx, n, keys);
+    if (cmd == NULL && n > 1) {
+        // Hitting two keys at once, and if there's no binding for this
+        // combination, the key hit last should be checked.
+        cmd = find_any_bind_for_key(ictx, 1, (int[]){keys[n - 1]});
     }
 
     if (cmd == NULL) {
@@ -1256,17 +1208,17 @@ static mp_cmd_t *interpret_key(struct input_ctx *ictx, int code)
      * we want to have "a" and "A" instead of "a" and "Shift+A"; but a separate
      * shift modifier is still kept for special keys like arrow keys.
      */
-    int unmod = code & ~KEY_MODIFIER_MASK;
+    int unmod = code & ~(MP_KEY_MODIFIER_MASK | MP_KEY_STATE_DOWN);
     if (unmod >= 32 && unmod < MP_KEY_BASE)
-        code &= ~KEY_MODIFIER_SHIFT;
+        code &= ~MP_KEY_MODIFIER_SHIFT;
 
-    if (code & MP_KEY_DOWN) {
+    if (code & MP_KEY_STATE_DOWN) {
         if (ictx->num_key_down >= MP_MAX_KEY_DOWN) {
             mp_tmsg(MSGT_INPUT, MSGL_ERR, "Too many key down events "
                     "at the same time\n");
             return NULL;
         }
-        code &= ~MP_KEY_DOWN;
+        code &= ~MP_KEY_STATE_DOWN;
         // Check if we don't already have this key as pushed
         for (j = 0; j < ictx->num_key_down; j++) {
             if (ictx->key_down[j] == code)
@@ -1278,22 +1230,26 @@ static mp_cmd_t *interpret_key(struct input_ctx *ictx, int code)
         ictx->num_key_down++;
         ictx->last_key_down = GetTimer();
         ictx->ar_state = 0;
-        return NULL;
+        ret = NULL;
+        if (!(code & MP_NO_REPEAT_KEY))
+            ret = get_cmd_from_keys(ictx, ictx->num_key_down, ictx->key_down);
+        return ret;
     }
     // button released or press of key with no separate down/up events
     for (j = 0; j < ictx->num_key_down; j++) {
         if (ictx->key_down[j] == code)
             break;
     }
-    bool doubleclick = code >= MOUSE_BTN0_DBL && code < MOUSE_BTN_DBL_END;
+    bool doubleclick = code >= MP_MOUSE_BTN0_DBL && code < MP_MOUSE_BTN_DBL_END;
     if (doubleclick) {
-        int btn = code - MOUSE_BTN0_DBL + MOUSE_BTN0;
+        int btn = code - MP_MOUSE_BTN0_DBL + MP_MOUSE_BTN0;
         if (!ictx->num_key_down
             || ictx->key_down[ictx->num_key_down - 1] != btn)
             return NULL;
         j = ictx->num_key_down - 1;
         ictx->key_down[j] = code;
     }
+    bool emit_key = ictx->last_key_down && (code & MP_NO_REPEAT_KEY);
     if (j == ictx->num_key_down) {  // was not already down; add temporarily
         if (ictx->num_key_down > MP_MAX_KEY_DOWN) {
             mp_tmsg(MSGT_INPUT, MSGL_ERR, "Too many key down events "
@@ -1302,14 +1258,14 @@ static mp_cmd_t *interpret_key(struct input_ctx *ictx, int code)
         }
         ictx->key_down[ictx->num_key_down] = code;
         ictx->num_key_down++;
-        ictx->last_key_down = 1;
+        emit_key = true;
     }
     // Interpret only maximal point of multibutton event
-    ret = ictx->last_key_down ?
-          get_cmd_from_keys(ictx, ictx->num_key_down, ictx->key_down)
-          : NULL;
+    ret = NULL;
+    if (emit_key)
+        ret = get_cmd_from_keys(ictx, ictx->num_key_down, ictx->key_down);
     if (doubleclick) {
-        ictx->key_down[j] = code - MOUSE_BTN0_DBL + MOUSE_BTN0;
+        ictx->key_down[j] = code - MP_MOUSE_BTN0_DBL + MP_MOUSE_BTN0;
         return ret;
     }
     // Remove the key
@@ -1330,9 +1286,13 @@ static mp_cmd_t *check_autorepeat(struct input_ctx *ictx)
     if (ictx->ar_rate > 0 && ictx->ar_state >= 0 && ictx->num_key_down > 0
         && !(ictx->key_down[ictx->num_key_down - 1] & MP_NO_REPEAT_KEY)) {
         unsigned int t = GetTimer();
+        if (ictx->last_ar + 2000000 < t)
+            ictx->last_ar = t;
         // First time : wait delay
         if (ictx->ar_state == 0
-            && (t - ictx->last_key_down) >= ictx->ar_delay * 1000) {
+            && (t - ictx->last_key_down) >= ictx->ar_delay * 1000)
+        {
+            talloc_free(ictx->ar_cmd);
             ictx->ar_cmd = get_cmd_from_keys(ictx, ictx->num_key_down,
                                              ictx->key_down);
             if (!ictx->ar_cmd) {
@@ -1340,12 +1300,12 @@ static mp_cmd_t *check_autorepeat(struct input_ctx *ictx)
                 return NULL;
             }
             ictx->ar_state = 1;
-            ictx->last_ar = t;
+            ictx->last_ar = ictx->last_key_down + ictx->ar_delay * 1000;
             return mp_cmd_clone(ictx->ar_cmd);
             // Then send rate / sec event
         } else if (ictx->ar_state == 1
                    && (t - ictx->last_ar) >= 1000000 / ictx->ar_rate) {
-            ictx->last_ar = t;
+            ictx->last_ar += 1000000 / ictx->ar_rate;
             return mp_cmd_clone(ictx->ar_cmd);
         }
     }
@@ -1356,11 +1316,13 @@ void mp_input_feed_key(struct input_ctx *ictx, int code)
 {
     ictx->got_new_events = true;
     if (code == MP_INPUT_RELEASE_ALL) {
+        mp_msg(MSGT_INPUT, MSGL_V, "input: release all\n");
         memset(ictx->key_down, 0, sizeof(ictx->key_down));
         ictx->num_key_down = 0;
         ictx->last_key_down = 0;
         return;
     }
+    mp_msg(MSGT_INPUT, MSGL_V, "input: key code=%#x\n", code);
     struct mp_cmd *cmd = interpret_key(ictx, code);
     if (!cmd)
         return;
@@ -1417,6 +1379,10 @@ static void read_key_fd(struct input_ctx *ictx, struct input_fd *key_fd)
  */
 static void read_events(struct input_ctx *ictx, int time)
 {
+    if (ictx->num_key_down) {
+        time = FFMIN(time, 1000 / ictx->ar_rate);
+        time = FFMIN(time, ictx->ar_delay);
+    }
     ictx->got_new_events = false;
     struct input_fd *key_fds = ictx->key_fds;
     struct input_fd *cmd_fds = ictx->cmd_fds;
@@ -1505,11 +1471,7 @@ static void read_all_fd_events(struct input_ctx *ictx, int time)
 static void read_all_events(struct input_ctx *ictx, int time)
 {
     getch2_poll();
-#ifdef CONFIG_COCOA
-    cocoa_events_read_all_events(ictx, time);
-#else
     read_all_fd_events(ictx, time);
-#endif
 }
 
 int mp_input_queue_cmd(struct input_ctx *ictx, mp_cmd_t *cmd)
@@ -1527,8 +1489,10 @@ int mp_input_queue_cmd(struct input_ctx *ictx, mp_cmd_t *cmd)
  */
 mp_cmd_t *mp_input_get_cmd(struct input_ctx *ictx, int time, int peek_only)
 {
-    if (async_quit_request)
-        return mp_input_parse_cmd(bstr0("quit 1"), "");
+    if (async_quit_request) {
+        struct mp_cmd *cmd = mp_input_parse_cmd(bstr0("quit 1"), "");
+        queue_add(&ictx->control_cmd_queue, cmd, true);
+    }
 
     if (ictx->control_cmd_queue.first || ictx->key_cmd_queue.first)
         time = 0;
@@ -1725,15 +1689,16 @@ static int parse_config(struct input_ctx *ictx, bool builtin, bstr data,
     return n_binds;
 }
 
-static int parse_config_file(struct input_ctx *ictx, char *file)
+static int parse_config_file(struct input_ctx *ictx, char *file, bool warn)
 {
     if (!mp_path_exists(file)) {
-        mp_msg(MSGT_INPUT, MSGL_V, "Input config file %s missing.\n", file);
+        mp_msg(MSGT_INPUT, warn ? MSGL_ERR : MSGL_V,
+               "Input config file %s not found.\n", file);
         return 0;
     }
     stream_t *s = open_stream(file, NULL, NULL);
     if (!s) {
-        mp_msg(MSGT_INPUT, MSGL_V, "Can't open input config file %s.\n", file);
+        mp_msg(MSGT_INPUT, MSGL_ERR, "Can't open input config file %s.\n", file);
         return 0;
     }
     bstr res = stream_read_complete(s, NULL, 1000000, 0);
@@ -1758,7 +1723,8 @@ char *mp_input_get_section(struct input_ctx *ictx)
     return ictx->section;
 }
 
-struct input_ctx *mp_input_init(struct input_conf *input_conf)
+struct input_ctx *mp_input_init(struct input_conf *input_conf,
+                                bool load_default_conf)
 {
     struct input_ctx *ictx = talloc_ptrtype(NULL, ictx);
     *ictx = (struct input_ctx){
@@ -1773,10 +1739,6 @@ struct input_ctx *mp_input_init(struct input_conf *input_conf)
     ictx->section = talloc_strdup(ictx, "default");
 
     parse_config(ictx, true, bstr0(builtin_input_conf), "<default>");
-
-#ifdef CONFIG_COCOA
-    cocoa_events_init(ictx, read_all_fd_events);
-#endif
 
 #ifndef __MINGW32__
     long ret = pipe(ictx->wakeup_pipe);
@@ -1794,27 +1756,18 @@ struct input_ctx *mp_input_init(struct input_conf *input_conf)
                             NULL, NULL);
 #endif
 
-    char *file;
-    char *config_file = input_conf->config_file;
-    file = config_file[0] != '/' ?
-        mp_find_user_config_file(config_file) : config_file;
-    if (!file)
-        return ictx;
-
-    if (!parse_config_file(ictx, file)) {
-        // free file if it was allocated by get_path(),
-        // before it gets overwritten
-        if (file != config_file)
-            talloc_free(file);
+    bool config_ok = false;
+    if (input_conf->config_file)
+        config_ok = parse_config_file(ictx, input_conf->config_file, true);
+    if (!config_ok && load_default_conf) {
         // Try global conf dir
-        file = MPLAYER_CONFDIR "/input.conf";
-        if (!parse_config_file(ictx, file))
-            mp_msg(MSGT_INPUT, MSGL_V, "Falling back on default (hardcoded) "
-                   "input config\n");
-    } else {
-        // free file if it was allocated by get_path()
-        if (file != config_file)
-            talloc_free(file);
+        char *file = mp_find_config_file("input.conf");
+        config_ok = file && parse_config_file(ictx, file, false);
+        talloc_free(file);
+    }
+    if (!config_ok) {
+        mp_msg(MSGT_INPUT, MSGL_V, "Falling back on default (hardcoded) "
+               "input config\n");
     }
 
 #ifdef CONFIG_JOYSTICK
@@ -1845,27 +1798,6 @@ struct input_ctx *mp_input_init(struct input_conf *input_conf)
     }
 #endif
 
-#ifdef CONFIG_APPLE_REMOTE
-    if (input_conf->use_ar) {
-        if (mp_input_ar_init() < 0)
-            mp_tmsg(MSGT_INPUT, MSGL_ERR, "Can't init Apple Remote.\n");
-        else
-            mp_input_add_key_fd(ictx, -1, 0, mp_input_ar_read,
-                                mp_input_ar_close, NULL);
-    }
-#endif
-
-#ifdef CONFIG_APPLE_IR
-    if (input_conf->use_ar) {
-        int fd = mp_input_appleir_init(input_conf->ar_dev);
-        if (fd < 0)
-            mp_tmsg(MSGT_INPUT, MSGL_ERR, "Can't init Apple Remote.\n");
-        else
-            mp_input_add_key_fd(ictx, fd, 1, mp_input_appleir_read,
-                                close, NULL);
-    }
-#endif
-
     if (input_conf->in_file) {
         int mode = O_RDONLY;
 #ifndef __MINGW32__
@@ -1888,12 +1820,17 @@ struct input_ctx *mp_input_init(struct input_conf *input_conf)
     return ictx;
 }
 
+static void clear_queue(struct cmd_queue *queue)
+{
+    while (queue->first) {
+        struct mp_cmd *item = queue->first;
+        queue_remove(queue, item);
+        talloc_free(item);
+    }
+}
+
 void mp_input_uninit(struct input_ctx *ictx)
 {
-#ifdef CONFIG_COCOA
-    cocoa_events_uninit();
-#endif
-
     if (!ictx)
         return;
 
@@ -1905,9 +1842,13 @@ void mp_input_uninit(struct input_ctx *ictx)
         if (ictx->cmd_fds[i].close_func)
             ictx->cmd_fds[i].close_func(ictx->cmd_fds[i].fd);
     }
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < 2; i++) {
         if (ictx->wakeup_pipe[i] != -1)
             close(ictx->wakeup_pipe[i]);
+    }
+    clear_queue(&ictx->key_cmd_queue);
+    clear_queue(&ictx->control_cmd_queue);
+    talloc_free(ictx->ar_cmd);
     talloc_free(ictx);
 }
 

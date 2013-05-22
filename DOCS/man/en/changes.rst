@@ -120,9 +120,16 @@ Command line switches
     -vobsub                             --sub (pass the .idx file)
     -ass-bottom-margin                  --vf=sub=bottom:top
     -vc ffh264vdpau (etc.)              --hwdec=vdpau
-    -x, -y                              --geometry + --no-keepaspect
-    -xy                                 --autofit
+    -ac spdifac3                        --ad=spdif:ac3 (see --ad=help)
+    -afm hwac3                          --ad=spdif:ac3,spdif:dts
+    -x W, -y H                          --geometry=WxH + --no-keepaspect
+    -xy W                               --autofit=W
+    -a52drc level                       --ad-lavc-ac3drc=level
+    -dumpstream                         --stream-dump=<filename>
+    -capture                            --stream-capture=<filename>
     =================================== ===================================
+
+*NOTE*: ``-opt val`` becomes ``--opt=val``.
 
 input.conf and slave commands
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -154,7 +161,7 @@ input.conf and slave commands
     |                                | a negative step instead.               |
     +--------------------------------+----------------------------------------+
     | step_property <prop> <step>    | Prefix cycle or add with no-osd:       |
-    | <dur>                          | no-osd cycle <prop> <step>             |
+    | <dir>                          | no-osd cycle <prop> <step>             |
     +--------------------------------+----------------------------------------+
     | osd_show_property_text <text>  | show_text <text>                       |
     |                                | The property expansion format string   |

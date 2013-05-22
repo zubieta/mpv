@@ -57,15 +57,11 @@ char *tv_channel_last_real;
 /* enumerating drivers (like in stream.c) */
 extern const tvi_info_t tvi_info_dummy;
 extern const tvi_info_t tvi_info_v4l2;
-extern const tvi_info_t tvi_info_bsdbt848;
 
 /** List of drivers in autodetection order */
 static const tvi_info_t* tvi_driver_list[]={
 #ifdef CONFIG_TV_V4L2
     &tvi_info_v4l2,
-#endif
-#ifdef CONFIG_TV_BSDBT848
-    &tvi_info_bsdbt848,
 #endif
     &tvi_info_dummy,
     NULL
@@ -717,8 +713,8 @@ static demuxer_t* demux_open_tv(demuxer_t *demuxer)
     /* get IMAGE FORMAT */
     int fourcc;
     funcs->control(tvh->priv, TVI_CONTROL_VID_GET_FORMAT, &fourcc);
-    sh_video->format = MP_FOURCC_RAWVIDEO;
-    sh_video->imgfmt = fourcc;
+    sh_video->gsh->codec = "rawvideo";
+    sh_video->format = fourcc;
 
     /* set FPS and FRAMETIME */
 
@@ -762,7 +758,6 @@ static demuxer_t* demux_open_tv(demuxer_t *demuxer)
     if (tvh->tv_param->noaudio == 0 && funcs->control(tvh->priv, TVI_CONTROL_IS_AUDIO, 0) == TVI_CONTROL_TRUE)
     {
 	int audio_format;
-	int sh_audio_format;
 	char buf[128];
 
 	/* yeah, audio is present */
@@ -783,7 +778,6 @@ static demuxer_t* demux_open_tv(demuxer_t *demuxer)
 	    case AF_FORMAT_S16_BE:
 	    case AF_FORMAT_S32_LE:
 	    case AF_FORMAT_S32_BE:
-		sh_audio_format = 0x1; /* PCM */
 		break;
 	    case AF_FORMAT_MPEG2:
 	    default:
@@ -798,23 +792,25 @@ static demuxer_t* demux_open_tv(demuxer_t *demuxer)
                    &sh_audio->samplerate);
 	funcs->control(tvh->priv, TVI_CONTROL_AUD_GET_SAMPLESIZE,
                    &sh_audio->samplesize);
+        int nchannels = sh_audio->channels.num;
 	funcs->control(tvh->priv, TVI_CONTROL_AUD_GET_CHANNELS,
-                   &sh_audio->channels);
+                   &nchannels);
+        mp_chmap_from_channels(&sh_audio->channels, nchannels);
 
-	sh_audio->format = sh_audio_format;
-	sh_audio->sample_format = audio_format;
+        sh_audio->gsh->codec = "mp-pcm";
+	sh_audio->format = audio_format;
 
 	sh_audio->i_bps = sh_audio->o_bps =
 	    sh_audio->samplerate * sh_audio->samplesize *
-	    sh_audio->channels;
+	    sh_audio->channels.num;
 
 	// emulate WF for win32 codecs:
 	sh_audio->wf = malloc(sizeof(*sh_audio->wf));
 	sh_audio->wf->wFormatTag = sh_audio->format;
-	sh_audio->wf->nChannels = sh_audio->channels;
+	sh_audio->wf->nChannels = sh_audio->channels.num;
 	sh_audio->wf->wBitsPerSample = sh_audio->samplesize * 8;
 	sh_audio->wf->nSamplesPerSec = sh_audio->samplerate;
-	sh_audio->wf->nBlockAlign = sh_audio->samplesize * sh_audio->channels;
+	sh_audio->wf->nBlockAlign = sh_audio->samplesize * sh_audio->channels.num;
 	sh_audio->wf->nAvgBytesPerSec = sh_audio->i_bps;
 
 	mp_tmsg(MSGT_DECVIDEO, MSGL_V, "  TV audio: %d channels, %d bits, %d Hz\n",

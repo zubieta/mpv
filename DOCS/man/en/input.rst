@@ -14,7 +14,7 @@ with shift.
 
 A list of special keys can be obtained with
 
-| **mpv** --input=keylist
+| **mpv** --input-keylist
 
 In general, keys can be combined with ``Shift``, ``Ctrl`` and ``Alt``:
 
@@ -23,7 +23,7 @@ In general, keys can be combined with ``Shift``, ``Ctrl`` and ``Alt``:
 **mpv** can be started in input test mode, which displays key bindings and the
 commands they're bound to on the OSD, instead of running the commands:
 
-| **mpv** --input=test --demuxer=rawvideo --rawvideo=w=1280:h=720 /dev/zero
+| **mpv** --input-test --demuxer=rawvideo --rawvideo=w=1280:h=720 /dev/zero
 
 (Commands which normally close the player will not work in this mode, and you
 must kill **mpv** externally to make it exit.)
@@ -51,7 +51,7 @@ List of input commands
 ignore
     Use this to "block" keys that should be unbound, and do nothing. Useful for
     disabling default bindings, without disabling all bindings with
-    ``--input=default-bindings=no``.
+    ``--no-input-default-bindings``.
 
 seek <seconds> [relative|absolute|absolute-percent|- [default-precise|exact|keyframes]]
     Change the playback position. By default, seeks by a relative amount of
@@ -78,6 +78,17 @@ seek <seconds> [relative|absolute|absolute-percent|- [default-precise|exact|keyf
 
 frame_step
     Play one frame, then pause.
+
+frame_back_step
+    Go back by one frame, then pause. Note that this can be very slow (it tries
+    to be precise, not fast), and sometimes fails to behave as expected. How
+    well this works depends on whether precise seeking works correctly (e.g.
+    see the ``--hr-seek-demuxer-offset`` option). Video filters or other video
+    postprocessing that modifies timing of frames (e.g. deinterlacing) should
+    usually work, but might make backstepping silently behave incorrectly in
+    corner cases.
+
+    This doesn't work with audio-only playback.
 
 set <property> "<value>"
     Set the given property to the given value.
@@ -158,6 +169,10 @@ run "<command>"
 quit [<code>]
     Exit the player using the given exit code.
 
+quit_watch_later
+    Exit player, and store current playback position. Playing that file later
+    will seek to the previous position on start.
+
 sub_add "<file>"
     Load the given subtitle file. It's not selected as current subtitle after
     loading.
@@ -205,13 +220,63 @@ show_tracks
     Show a list of video/audio/subtitle tracks on the OSD.
 
 
+Input commands that are possibly subject to change
+--------------------------------------------------
+
+af_switch "filter1=params,filter2,..."
+    Replace the current filter chain with the given list.
+
+af_add "filter1=params,filter2,..."
+    Add the given list of audio filters to the audio filter chain.
+
+af_del "filter1,filter2,..."
+    Remove the given list of audio filters.
+
+af_clr
+    Remove all audio filters. (Conversion filters will be re-added
+    automatically if needed.)
+
+vf set|add|toggle|del "filter1=params,filter2,..."
+    Change video filter chain.
+
+    The first argument decides what happens:
+
+    set
+        Overwrite the previous filter chain with the new one.
+
+    add
+        Append the new filter chain to the previous one.
+
+    toggle
+        Check if the given filter (with the exact parameters) is already
+        in the video chain. If yes, remove the filter. If no, add the filter.
+        (If several filters are passed to the command, this is done for
+        each filter.)
+
+    del
+        Remove the given filters from the video chain. Unlike in the other
+        cases, the second parameter is a comma separated list of filter names
+        or integer indexes. ``0`` would denote the first filter. Negative
+        indexes start from the last filter, and ``-1`` denotes the last
+        filter.
+
+    You can assign labels to filter by prefixing them with ``@name:`` (where
+    ``name`` is a user-chosen arbitrary identifiers). Labels can be used to
+    refer to filters by name in all of the filter chain modification commands.
+    For ``add``, using an already used label will replace the existing filter.
+
+    *EXAMPLE for input.conf*:
+
+    - ``a vf set flip`` turn video upside-down on the ``a`` key
+    - ``b vf set ""`` remove all video filters on ``b``
+    - ``c vf toggle lavfi=gradfun`` toggle debanding on ``c``
+
 
 Undocumented commands: tv_start_scan, tv_step_channel, tv_step_norm,
 tv_step_chanlist, tv_set_channel, tv_last_channel, tv_set_freq, tv_step_freq,
 tv_set_norm, dvb_set_channel, radio_step_channel, radio_set_channel,
 radio_set_freq, radio_step_freq (all of these should be replaced by properties),
-edl_mark, stop (questionable use), get_property (?), af_switch, af_add, af_del,
-af_clr, af_cmdline, vo_cmdline (experimental).
+stop (questionable use), get_property (?), af_cmdline, vo_cmdline (experimental).
 
 Input command prefixes
 ----------------------
@@ -229,10 +294,14 @@ osd-msg
     value as text.
 osd-msg-bar
     Combine osd-bar and osd-msg.
+raw
+    Don't expand properties in string arguments. (Like ``"${property-name}"``.)
+expand-properties (default)
+    All string arguments are expanded like in ``--playing-msg``.
 
 
-
-All of these are still overridden by the global ``--osd-level`` settings.
+All of the osd prefixes are still overridden by the global ``--osd-level``
+settings.
 
 Undocumented prefixes: pausing, pausing_keep, pausing_toggle,
 pausing_keep_force. (Should these be made official?)
@@ -253,6 +322,7 @@ option.
 Name                        W Comment
 =========================== = ==================================================
 osd-level                   x see ``--osd-level``
+osd-scale                   x osd font size multiplicator, see ``--osd-scale``
 loop                        x see ``--loop``
 speed                       x see ``--speed``
 filename                      currently played file (path stripped)
@@ -269,6 +339,7 @@ length                        length of the current file in seconds
 avsync                        last A/V synchronization difference
 percent-pos                 x position in current file (0-100)
 time-pos                    x position in current file in seconds
+time-remaining                estimated remaining length of the file in seconds
 chapter                     x current chapter number
 edition                     x current MKV edition number
 titles                        number of DVD titles
@@ -278,12 +349,13 @@ angle                       x current DVD angle
 metadata                      metadata key/value pairs
 metadata/<key>                value of metadata entry <key>
 pause                       x pause status (bool)
+cache                         network cache fill state (0-100)
 pts-association-mode        x see ``--pts-association-mode``
 hr-seek                     x see ``--hr-seek``
 volume                      x current volume (0-100)
 mute                        x current mute status (bool)
 audio-delay                 x see ``--audio-delay``
-audio-format                  audio format (codec tag)
+audio-format                  audio format (string)
 audio-codec                   audio codec selected for decoding
 audio-bitrate                 audio bitrate
 samplerate                    audio samplerate
@@ -296,7 +368,6 @@ colormatrix                 x see ``--colormatrix``
 colormatrix-input-range     x see ``--colormatrix-input-range``
 colormatrix-output-range    x see ``--colormatrix-output-range``
 ontop                       x see ``--ontop``
-rootwin                     x see ``--rootwin``
 border                      x see ``--border``
 framedrop                   x see ``--framedrop``
 gamma                       x see ``--gamma``
@@ -305,17 +376,18 @@ contrast                    x see ``--contrast``
 saturation                  x see ``--saturation``
 hue                         x see ``--hue``
 panscan                     x see ``--panscan``
-vsync                       x see ``--vsync``
-video-format                  video format (integer FourCC)
+video-format                  video format (string)
 video-codec                   video codec selected for decoding
 video-bitrate                 video bitrate
-width                         video width
+width                         video width (container or decoded size)
 height                        video height
-fps                           FPS (may contain bogus values)
+fps                           container FPS (may contain bogus values)
+dwidth                        video width (after filters and aspect scaling)
+dheight                       video height
 aspect                      x video aspect
 video                       x current video track (similar to ``--vid``)
 program                     x switch TS program (write-only)
-sub                         x current subttitle track (similar to ``--sid``)
+sub                         x current subtitle track (similar to ``--sid``)
 sub-delay                   x see ``--sub-delay``
 sub-pos                     x see ``--sub-pos``
 sub-visibility              x whether current subtitle is rendered
@@ -324,6 +396,7 @@ sub-scale                   x subtitle font size multiplicator
 ass-use-margins             x see ``--ass-use-margins``
 ass-vsfilter-aspect-compat  x see ``--ass-vsfilter-aspect-compat``
 ass-style-override          x see ``--ass-style-override``
+stream-capture              x a filename, see ``--capture``
 tv-brightness               x
 tv-contrast                 x
 tv-saturation               x

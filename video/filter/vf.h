@@ -24,7 +24,6 @@
 #include "video/mp_image.h"
 #include "core/mp_common.h"
 
-#include "core/mpc_info.h"
 #include "video/vfcap.h"
 
 struct MPOpts;
@@ -67,8 +66,8 @@ typedef struct vf_instance {
 
     void (*uninit)(struct vf_instance *vf);
 
-    // caps:
-    unsigned int default_caps; // used by default query_format()
+    char *label;
+
     // data:
     struct vf_format fmt_in, fmt_out;
     struct vf_instance *next;
@@ -135,6 +134,8 @@ int vf_next_query_format(struct vf_instance *vf, unsigned int fmt);
 struct m_obj_settings;
 vf_instance_t *append_filters(vf_instance_t *last,
                               struct m_obj_settings *vf_settings);
+
+vf_instance_t *vf_find_by_label(vf_instance_t *chain, const char *label);
 
 void vf_uninit_filter(vf_instance_t *vf);
 void vf_uninit_filter_chain(vf_instance_t *vf);

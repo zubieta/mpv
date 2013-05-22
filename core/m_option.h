@@ -25,6 +25,7 @@
 
 #include "config.h"
 #include "core/bstr.h"
+#include "audio/chmap.h"
 
 // m_option allows to parse, print and copy data of various types.
 
@@ -36,6 +37,8 @@ struct m_struct_st;
 
 // Simple types
 extern const m_option_type_t m_option_type_flag;
+extern const m_option_type_t m_option_type_store;
+extern const m_option_type_t m_option_type_float_store;
 extern const m_option_type_t m_option_type_int;
 extern const m_option_type_t m_option_type_int64;
 extern const m_option_type_t m_option_type_intpair;
@@ -58,6 +61,7 @@ extern const m_option_type_t m_option_type_afmt;
 extern const m_option_type_t m_option_type_color;
 extern const m_option_type_t m_option_type_geometry;
 extern const m_option_type_t m_option_type_size_box;
+extern const m_option_type_t m_option_type_chmap;
 
 // Callback used by m_option_type_print_func options.
 typedef int (*m_opt_func_full_t)(const m_option_t *, const char *, const char *);
@@ -106,6 +110,8 @@ typedef struct {
 typedef struct m_obj_settings {
     // Type of the object.
     char *name;
+    // Optional user-defined name.
+    char *label;
     // NULL terminated array of parameter/value pairs.
     char **attribs;
 } m_obj_settings_t;
@@ -116,27 +122,6 @@ typedef struct m_obj_settings {
  *  the available object types.
  */
 extern const m_option_type_t m_option_type_obj_settings_list;
-
-// Extra definition needed for \ref m_option_type_obj_presets options.
-typedef struct {
-    // Description of the struct holding the presets.
-    const struct m_struct_st *in_desc;
-    // Description of the struct that should be set by the presets.
-    const struct m_struct_st *out_desc;
-    // Pointer to an array of structs defining the various presets.
-    const void *presets;
-    // Offset of the preset's name inside the in_struct.
-    void *name_off;
-} m_obj_presets_t;
-
-// Set several fields in a struct at once.
-/** For this two struct descriptions are used. One for the struct holding the
- *  preset and one for the struct beeing set. Every field present in both
- *  structs will be copied from the preset struct to the destination one.
- *  The option priv field (\ref m_option::priv) must point to a correctly
- *  filled \ref m_obj_presets_t.
- */
-extern const m_option_type_t m_option_type_obj_presets;
 
 // Parse an URL into a struct.
 /** The option priv field (\ref m_option::priv) must point to a
@@ -152,24 +137,14 @@ typedef struct {
     char separator;
 } m_obj_params_t;
 
-// Parse a set of parameters.
-/** Parameters are separated by the given separator and each one
- *  successively sets a field from the struct. The option priv field
- *  (\ref m_option::priv) must point to a \ref m_obj_params_t.
- */
-extern const m_option_type_t m_option_type_obj_params;
-
-typedef struct {
-    int start;
-    int end;
-} m_span_t;
-// Ready made settings to parse a \ref m_span_t with a start-end syntax.
-extern const m_obj_params_t m_span_params_def;
-
 struct m_opt_choice_alternatives {
     char *name;
     int value;
 };
+
+// For OPT_STRING_VALIDATE(). Behaves like m_option_type.parse().
+typedef int (*m_opt_string_validate_fn)(const m_option_t *opt, struct bstr name,
+                                        struct bstr param);
 
 // m_option.priv points to this if M_OPT_TYPE_USE_SUBSTRUCT is used
 struct m_sub_options {
@@ -180,6 +155,7 @@ struct m_sub_options {
 
 // FIXME: backward compatibility
 #define CONF_TYPE_FLAG          (&m_option_type_flag)
+#define CONF_TYPE_STORE         (&m_option_type_store)
 #define CONF_TYPE_INT           (&m_option_type_int)
 #define CONF_TYPE_INT64         (&m_option_type_int64)
 #define CONF_TYPE_FLOAT         (&m_option_type_float)
@@ -192,21 +168,23 @@ struct m_sub_options {
 #define CONF_TYPE_IMGFMT        (&m_option_type_imgfmt)
 #define CONF_TYPE_FOURCC        (&m_option_type_fourcc)
 #define CONF_TYPE_AFMT          (&m_option_type_afmt)
-#define CONF_TYPE_SPAN          (&m_option_type_span)
 #define CONF_TYPE_OBJ_SETTINGS_LIST (&m_option_type_obj_settings_list)
-#define CONF_TYPE_OBJ_PRESETS   (&m_option_type_obj_presets)
 #define CONF_TYPE_CUSTOM_URL    (&m_option_type_custom_url)
 #define CONF_TYPE_OBJ_PARAMS    (&m_option_type_obj_params)
 #define CONF_TYPE_TIME          (&m_option_type_time)
 #define CONF_TYPE_CHOICE        (&m_option_type_choice)
+#define CONF_TYPE_INT_PAIR      (&m_option_type_intpair)
 
 // Possible option values. Code is allowed to access option data without going
 // through this union. It serves for self-documentation and to get minimal
 // size/alignment requirements for option values in general.
 union m_option_value {
     int flag; // not the C type "bool"!
+    int store;
+    float float_store;
     int int_;
     int64_t int64;
+    int intpair[2];
     float float_;
     double double_;
     char *string;
@@ -214,13 +192,13 @@ union m_option_value {
     int imgfmt;
     unsigned int fourcc;
     int afmt;
-    m_span_t span;
     m_obj_settings_t *obj_settings_list;
     double time;
     struct m_rel_time rel_time;
     struct m_color color;
     struct m_geometry geometry;
     struct m_geometry size_box;
+    struct mp_chmap chmap;
 };
 
 ////////////////////////////////////////////////////////////////////////////
@@ -352,13 +330,11 @@ struct m_option {
 // The option should be set during command line pre-parsing
 #define M_OPT_PRE_PARSE         (1 << 6)
 
-// For options with children, add all children as top-level arguments
-// (e.g. "--parent=child=value" becomes "--parent-child=value")
-#define M_OPT_PREFIXED          (1 << 8)
+// See M_OPT_TYPE_OPTIONAL_PARAM.
+#define M_OPT_OPTIONAL_PARAM    (1 << 10)
 
-// Similar to M_OPT_PREFIXED, but drop the prefix.
-// (e.g. "--parent=child=value" becomes "--child=value")
-#define M_OPT_MERGE             (1 << 9)
+// Parse C-style escapes like "\n" (for CONF_TYPE_STRING only)
+#define M_OPT_PARSE_ESCAPES     (1 << 11)
 
 // These are kept for compatibility with older code.
 #define CONF_MIN                M_OPT_MIN
@@ -394,10 +370,11 @@ struct m_option {
  */
 #define M_OPT_TYPE_DYNAMIC              (1 << 2)
 
-// The parameter is optional and by default no parameter is preferred. If the
-// "old syntax" is used, the command line parser will assume that the argument
-// takes no parameter.
-#define M_OPT_TYPE_OLD_SYNTAX_NO_PARAM  (1 << 3)
+// The parameter is optional and by default no parameter is preferred. If
+// ambiguous syntax is used ("--opt value"), the command line parser will
+// assume that the argument takes no parameter. In config files, these
+// options can be used without "=" and value.
+#define M_OPT_TYPE_OPTIONAL_PARAM       (1 << 3)
 
 // modify M_OPT_TYPE_HAS_CHILD so that m_option::p points to
 // struct m_sub_options, instead of a direct m_option array.
@@ -405,7 +382,9 @@ struct m_option {
 
 ///////////////////////////// Parser flags /////////////////////////////////
 
-// On success parsers return the number of arguments consumed: 0 or 1.
+// OptionParserReturn
+//
+// On success parsers return a number >= 0.
 //
 // To indicate that MPlayer should exit without playing anything,
 // parsers return M_OPT_EXIT minus the number of parameters they
@@ -426,13 +405,16 @@ struct m_option {
 // vary from type to type.
 #define M_OPT_OUT_OF_RANGE      -4
 
+// The option doesn't take a parameter.
+#define M_OPT_DISALLOW_PARAM    -5
+
 // Returned if the parser failed for any other reason than a bad parameter.
-#define M_OPT_PARSER_ERR        -5
+#define M_OPT_PARSER_ERR        -6
 
 // Returned when MPlayer should exit. Used by various help stuff.
 /** M_OPT_EXIT must be the lowest number on this list.
  */
-#define M_OPT_EXIT              -6
+#define M_OPT_EXIT              -7
 
 char *m_option_strerror(int code);
 
@@ -487,7 +469,19 @@ static inline void m_option_free(const m_option_t *opt, void *dst)
         opt->type->free(dst);
 }
 
-/*@}*/
+int m_option_required_params(const m_option_t *opt);
+
+// Cause a compilation warning if typeof(expr) != type.
+// Should be used with pointer types only.
+#define MP_EXPECT_TYPE(type, expr) (0 ? (type)0 : (expr))
+
+// This behaves like offsetof(type, member), but will cause a compilation
+// warning if typeof(member) != expected_member_type.
+// It uses some trickery to make it compile as expression.
+#define MP_CHECKED_OFFSETOF(type, member, expected_member_type)             \
+    (offsetof(type, member) + (0 && MP_EXPECT_TYPE(expected_member_type*,   \
+                                                   &((type*)0)->member)))
+
 
 #define OPTION_LIST_SEPARATOR ','
 
@@ -500,7 +494,17 @@ static inline void m_option_free(const m_option_t *opt, void *dst)
 #define OPTDEF_STR(s) .defval = (void *)&(char * const){s}
 #define OPTDEF_INT(i) .defval = (void *)&(const int){i}
 
-#define OPT_GENERAL(optname, varname, flagv, ...) {.name = optname, .flags = flagv, .new = 1, .offset = offsetof(OPT_BASE_STRUCT, varname), __VA_ARGS__}
+#define OPT_GENERAL(ctype, optname, varname, flagv, ...)                \
+    {.name = optname, .flags = flagv, .new = 1,                         \
+    .offset = MP_CHECKED_OFFSETOF(OPT_BASE_STRUCT, varname, ctype),     \
+    __VA_ARGS__}
+
+#define OPT_GENERAL_NOTYPE(optname, varname, flagv, ...)                \
+    {.name = optname, .flags = flagv, .new = 1,                         \
+    .offset = offsetof(OPT_BASE_STRUCT, varname),                       \
+    __VA_ARGS__}
+
+#define OPT_HELPER_REMOVEPAREN(...) __VA_ARGS__
 
 /* The OPT_FLAG_CONSTANTS->OPT_FLAG_CONSTANTS_ kind of redirection exists to
  * make the code fully standard-conforming: the C standard requires that
@@ -508,44 +512,122 @@ static inline void m_option_free(const m_option_t *opt, void *dst)
  * 0). Thus the first OPT_FLAG_CONSTANTS is a wrapper which just adds one
  * argument to ensure __VA_ARGS__ is not empty when calling the next macro.
  */
-#define OPT_FLAG_ON(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_flag, .max = 1)
-#define OPT_FLAG_OFF(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_flag, .min = 1)
-#define OPT_MAKE_FLAGS OPT_FLAG_ON
-#define OPT_FLAG_CONSTANTS(...) OPT_FLAG_CONSTANTS_(__VA_ARGS__, .type = &m_option_type_flag)
-#define OPT_FLAG_CONSTANTS_(optname, varname, flags, offvalue, value, ...) OPT_GENERAL(optname, varname, flags, .min = offvalue, .max = value, __VA_ARGS__)
-#define OPT_STRINGLIST(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_string_list)
-#define OPT_PATHLIST(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_string_list, .priv = (void *)&(const char){OPTION_PATH_SEPARATOR})
-#define OPT_INT(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_int)
-#define OPT_INTRANGE(...) OPT_RANGE_(__VA_ARGS__, .type = &m_option_type_int)
-#define OPT_RANGE_(optname, varname, flags, minval, maxval, ...) OPT_GENERAL(optname, varname, (flags) | CONF_RANGE, .min = minval, .max = maxval, __VA_ARGS__)
-#define OPT_INTPAIR(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_intpair)
-#define OPT_FLOAT(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_float)
-#define OPT_FLOATRANGE(...) OPT_RANGE_(__VA_ARGS__, .type = &m_option_type_float)
-#define OPT_STRING(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_string)
-#define OPT_SETTINGSLIST(optname, varname, flags, objlist) OPT_GENERAL(optname, varname, flags, .type = &m_option_type_obj_settings_list, .priv = objlist)
-#define OPT_AUDIOFORMAT(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_afmt)
-#define OPT_HELPER_REMOVEPAREN(...) __VA_ARGS__
-#define M_CHOICES(choices) .priv = (void *)&(const struct m_opt_choice_alternatives[]){OPT_HELPER_REMOVEPAREN choices, {NULL}}
-#define OPT_CHOICE(...) OPT_CHOICE_(__VA_ARGS__, .type = &m_option_type_choice)
-#define OPT_CHOICE_(optname, varname, flags, choices, ...) OPT_GENERAL(optname, varname, flags, M_CHOICES(choices), __VA_ARGS__)
+
+#define OPT_FLAG(...) \
+    OPT_GENERAL(int, __VA_ARGS__, .type = &m_option_type_flag, .max = 1)
+
+#define OPT_FLAG_CONSTANTS_(optname, varname, flags, offvalue, value, ...) \
+    OPT_GENERAL(int, optname, varname, flags,                              \
+                .min = offvalue, .max = value, __VA_ARGS__)
+#define OPT_FLAG_CONSTANTS(...) \
+    OPT_FLAG_CONSTANTS_(__VA_ARGS__, .type = &m_option_type_flag)
+
+#define OPT_FLAG_STORE(optname, varname, flags, value)          \
+    OPT_GENERAL(int, optname, varname, flags, .max = value,     \
+                .type = &m_option_type_store)
+
+#define OPT_FLOAT_STORE(optname, varname, flags, value)         \
+    OPT_GENERAL(float, optname, varname, flags, .max = value,   \
+                .type = &m_option_type_float_store)
+
+#define OPT_STRINGLIST(...) \
+    OPT_GENERAL(char**, __VA_ARGS__, .type = &m_option_type_string_list)
+
+#define OPT_PATHLIST(...)                                                \
+    OPT_GENERAL(char**, __VA_ARGS__, .type = &m_option_type_string_list, \
+                .priv = (void *)&(const char){OPTION_PATH_SEPARATOR})
+
+#define OPT_INT(...) \
+    OPT_GENERAL(int, __VA_ARGS__, .type = &m_option_type_int)
+
+#define OPT_INT64(...) \
+    OPT_GENERAL(int64_t, __VA_ARGS__, .type = &m_option_type_int64)
+
+#define OPT_RANGE_(ctype, optname, varname, flags, minval, maxval, ...) \
+    OPT_GENERAL(ctype, optname, varname, (flags) | CONF_RANGE,          \
+                .min = minval, .max = maxval, __VA_ARGS__)
+
+#define OPT_INTRANGE(...) \
+    OPT_RANGE_(int, __VA_ARGS__, .type = &m_option_type_int)
+
+#define OPT_FLOATRANGE(...) \
+    OPT_RANGE_(float, __VA_ARGS__, .type = &m_option_type_float)
+
+#define OPT_INTPAIR(...) \
+    OPT_GENERAL_NOTYPE(__VA_ARGS__, .type = &m_option_type_intpair)
+
+#define OPT_FLOAT(...) \
+    OPT_GENERAL(float, __VA_ARGS__, .type = &m_option_type_float)
+
+#define OPT_DOUBLE(...) \
+    OPT_GENERAL(double, __VA_ARGS__, .type = &m_option_type_double)
+
+#define OPT_STRING(...) \
+    OPT_GENERAL(char*, __VA_ARGS__, .type = &m_option_type_string)
+
+#define OPT_SETTINGSLIST(optname, varname, flags, objlist)      \
+    OPT_GENERAL(m_obj_settings_t*, optname, varname, flags,     \
+                .type = &m_option_type_obj_settings_list,       \
+                .priv = objlist)
+
+#define OPT_AUDIOFORMAT(...) \
+    OPT_GENERAL(int, __VA_ARGS__, .type = &m_option_type_afmt)
+
+#define OPT_CHMAP(...) \
+    OPT_GENERAL(struct mp_chmap, __VA_ARGS__, .type = &m_option_type_chmap)
+
+
+#define M_CHOICES(choices)                                              \
+    .priv = (void *)&(const struct m_opt_choice_alternatives[]){        \
+                      OPT_HELPER_REMOVEPAREN choices, {NULL}}
+
+#define OPT_CHOICE(...) \
+    OPT_CHOICE_(__VA_ARGS__, .type = &m_option_type_choice)
+#define OPT_CHOICE_(optname, varname, flags, choices, ...) \
+    OPT_GENERAL(int, optname, varname, flags, M_CHOICES(choices), __VA_ARGS__)
+
 // Union of choices and an int range. The choice values can be included in the
 // int range, or be completely separate - both works.
-#define OPT_CHOICE_OR_INT(...) OPT_CHOICE_OR_INT_(__VA_ARGS__, .type = &m_option_type_choice)
-#define OPT_CHOICE_OR_INT_(optname, varname, flags, minval, maxval, choices, ...) OPT_GENERAL(optname, varname, (flags) | CONF_RANGE, .min = minval, .max = maxval, M_CHOICES(choices), __VA_ARGS__)
-#define OPT_TIME(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_time)
-#define OPT_REL_TIME(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_rel_time)
-#define OPT_COLOR(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_color)
-#define OPT_GEOMETRY(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_geometry)
-#define OPT_SIZE_BOX(...) OPT_GENERAL(__VA_ARGS__, .type = &m_option_type_size_box)
+#define OPT_CHOICE_OR_INT_(optname, varname, flags, minval, maxval, choices, ...) \
+    OPT_GENERAL(int, optname, varname, (flags) | CONF_RANGE,                      \
+                .min = minval, .max = maxval,                                     \
+                M_CHOICES(choices), __VA_ARGS__)
+#define OPT_CHOICE_OR_INT(...) \
+    OPT_CHOICE_OR_INT_(__VA_ARGS__, .type = &m_option_type_choice)
 
-#define OPT_TRACKCHOICE(name, var) OPT_CHOICE_OR_INT(name, var, 0, 0, 8190, ({"no", -2}, {"auto", -1}))
+#define OPT_TIME(...) \
+    OPT_GENERAL(double, __VA_ARGS__, .type = &m_option_type_time)
+
+#define OPT_REL_TIME(...) \
+    OPT_GENERAL(struct m_rel_time, __VA_ARGS__, .type = &m_option_type_rel_time)
+
+#define OPT_COLOR(...) \
+    OPT_GENERAL(struct m_color, __VA_ARGS__, .type = &m_option_type_color)
+
+#define OPT_GEOMETRY(...) \
+    OPT_GENERAL(struct m_geometry, __VA_ARGS__, .type = &m_option_type_geometry)
+
+#define OPT_SIZE_BOX(...) \
+    OPT_GENERAL(struct m_geometry, __VA_ARGS__, .type = &m_option_type_size_box)
+
+#define OPT_TRACKCHOICE(name, var) \
+    OPT_CHOICE_OR_INT(name, var, 0, 0, 8190, ({"no", -2}, {"auto", -1}))
+
+#define OPT_STRING_VALIDATE_(optname, varname, flags, validate_fn, ...)        \
+    OPT_GENERAL(char*, optname, varname, flags, __VA_ARGS__,                                            \
+                .priv = MP_EXPECT_TYPE(m_opt_string_validate_fn, validate_fn))
+#define OPT_STRING_VALIDATE(...) \
+    OPT_STRING_VALIDATE_(__VA_ARGS__, .type = &m_option_type_string)
 
 // subconf must have the type struct m_sub_options.
-// flagv should be M_OPT_MERGE or M_OPT_FLATTEN.
+// All sub-options are prefixed with "name-" and are added to the current
+// (containing) option list.
+// If name is "", add the sub-options directly instead.
 // varname refers to the field, that must be a pointer to a field described by
 // the subconf struct.
-#define OPT_SUBSTRUCT(varname, subconf, flagv) OPT_GENERAL("-", varname, flagv, .type = &m_option_type_subconfig_struct, .priv = (void*)&subconf)
-
-#define OPT_BASE_STRUCT struct MPOpts
+#define OPT_SUBSTRUCT(name, varname, subconf, flagv)            \
+    OPT_GENERAL_NOTYPE(name, varname, flagv,                    \
+                       .type = &m_option_type_subconfig_struct, \
+                       .priv = (void*)&subconf)
 
 #endif /* MPLAYER_M_OPTION_H */

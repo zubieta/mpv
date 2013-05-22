@@ -353,6 +353,7 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 			const char *lang = pid_lang_from_pmt(priv, es->pid);
 			sh->needs_parsing = 1;
 			sh->format = IS_AUDIO(es->type) ? es->type : es->subtype;
+                        mp_set_audio_codec_from_tag(sh);
 			sh->ds = demuxer->audio;
 
 			priv->ts.streams[es->pid].id = priv->last_aid;
@@ -378,6 +379,7 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 		if(sh)
 		{
 			sh->format = IS_VIDEO(es->type) ? es->type : es->subtype;
+                        mp_set_video_codec_from_tag(sh);
 			sh->ds = demuxer->video;
 
 			priv->ts.streams[es->pid].id = priv->last_vid;
@@ -413,11 +415,11 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
  		if (sh) {
 			switch (es->type) {
 			case SPU_DVB:
-				sh->type = 'b'; break;
+				sh->gsh->codec = "dvb_subtitle"; break;
 			case SPU_DVD:
-				sh->type = 'v'; break;
+				sh->gsh->codec = "dvd_subtitle"; break;
 			case SPU_PGS:
-				sh->type = 'p'; break;
+				sh->gsh->codec = "hdmv_pgs_subtitle"; break;
         		}
 			priv->ts.streams[es->pid].id = priv->last_sid;
 			priv->ts.streams[es->pid].sh = sh;
@@ -988,6 +990,7 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 
 
 	demuxer->type= DEMUXER_TYPE_MPEG_TS;
+        demuxer->ts_resets_possible = true;
 
 
 	stream_reset(demuxer->stream);
@@ -1021,11 +1024,6 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 
 
 	demuxer->priv = priv;
-	if(demuxer->stream->type != STREAMTYPE_FILE)
-		demuxer->seekable = 1;
-	else
-		demuxer->seekable = 1;
-
 
 	params.atype = params.vtype = params.stype = UNKNOWN;
 	params.apid = demuxer->audio->id;
@@ -1054,6 +1052,7 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 		demuxer->video->id = priv->ts.streams[params.vpid].id;
 		sh_video->ds = demuxer->video;
 		sh_video->format = params.vtype;
+                mp_set_video_codec_from_tag(sh_video);
 		demuxer->video->sh = sh_video;
 	}
 
@@ -1067,6 +1066,7 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 		demuxer->audio->id = priv->ts.streams[params.apid].id;
 		sh_audio->ds = demuxer->audio;
 		sh_audio->format = params.atype;
+                mp_set_audio_codec_from_tag(sh_audio);
 		demuxer->audio->sh = sh_audio;
 	}
 
@@ -2981,7 +2981,7 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 			{
 				sh_sub_t *sh_sub = demuxer->sub->sh;
 
-				if(sh_sub && sh_sub->sid == tss->pid)
+				if(sh_sub && sh_sub->gsh->demuxer_id == tss->pid)
 				{
 					ds = demuxer->sub;
 
