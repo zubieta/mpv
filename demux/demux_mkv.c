@@ -155,7 +155,9 @@ typedef struct mkv_track {
 
 typedef struct mkv_index {
     int tnum;
-    uint64_t timecode, filepos;
+    int block_offset; // > 0: like in CueRelativePosition, < 0: cluster offset
+    uint64_t filepos;
+    uint64_t timecode, duration;
 } mkv_index_t;
 
 typedef struct mkv_demuxer {
@@ -677,20 +679,25 @@ static int demux_mkv_read_tracks(demuxer_t *demuxer)
 }
 
 static void cue_index_add(demuxer_t *demuxer, int track_id, uint64_t filepos,
-                          uint64_t timecode)
+                          int block_offset, uint64_t timecode, uint64_t duration)
 {
     mkv_demuxer_t *mkv_d = (mkv_demuxer_t *) demuxer->priv;
 
     mkv_d->indexes = grow_array(mkv_d->indexes, mkv_d->num_indexes,
                                 sizeof(mkv_index_t));
-    mkv_d->indexes[mkv_d->num_indexes].tnum = track_id;
-    mkv_d->indexes[mkv_d->num_indexes].timecode = timecode;
-    mkv_d->indexes[mkv_d->num_indexes].filepos = filepos;
+    mkv_d->indexes[mkv_d->num_indexes] = (mkv_index_t) {
+        .tnum = track_id,
+        .filepos = filepos,
+        .block_offset = block_offset,
+        .timecode = timecode,
+        .duration = duration,
+    };
     mkv_d->num_indexes++;
 }
 
 static void add_block_position(demuxer_t *demuxer, struct mkv_track *track,
-                               uint64_t filepos, uint64_t timecode)
+                               uint64_t filepos, int block_offset,
+                               uint64_t timecode, uint64_t duration)
 {
     mkv_demuxer_t *mkv_d = (mkv_demuxer_t *) demuxer->priv;
 
@@ -698,13 +705,12 @@ static void add_block_position(demuxer_t *demuxer, struct mkv_track *track,
         return;
     if (track->last_index_entry >= 0) {
         mkv_index_t *index = &mkv_d->indexes[track->last_index_entry];
-        // filepos is always the cluster position, which can contain multiple
-        // blocks with different timecodes - one is enough.
-        // Also, never add block which are already covered by the index.
-        if (index->filepos == filepos || index->timecode >= timecode)
+        // Never add blocks which are already covered by the index.
+        if (index->timecode >= timecode)
             return;
     }
-    cue_index_add(demuxer, track->tnum, filepos, timecode);
+    cue_index_add(demuxer, track->tnum, filepos, block_offset,
+                  timecode, duration);
     track->last_index_entry = mkv_d->num_indexes - 1;
 }
 
@@ -738,11 +744,15 @@ static int demux_mkv_read_cues(demuxer_t *demuxer)
             struct ebml_cue_track_positions *trackpos =
                 &cuepoint->cue_track_positions[i];
             uint64_t pos = mkv_d->segment_start + trackpos->cue_cluster_position;
-            cue_index_add(demuxer, trackpos->cue_track, pos, time);
+            cue_index_add(demuxer, trackpos->cue_track, pos,
+                          trackpos->cue_relative_position, time,
+                          trackpos->cue_duration);
             mp_msg(MSGT_DEMUX, MSGL_DBG2,
                    "[mkv] |+ found cue point for track %" PRIu64
-                   ": timecode %" PRIu64 ", filepos: %" PRIu64 "\n",
-                   trackpos->cue_track, time, pos);
+                   ": timecode %" PRIu64 ", filepos: %" PRIu64
+                   " offset %" PRIu64 ", duration %" PRIu64 "\n",
+                   trackpos->cue_track, time, pos,
+                   trackpos->cue_relative_position, trackpos->cue_duration);
         }
     }
 
@@ -2161,6 +2171,7 @@ static void mkv_parse_packet(mkv_track_t *track, bstr *buffer)
 }
 
 struct block_info {
+    uint64_t block_pos;
     uint64_t duration;
     bool simple, keyframe;
     uint64_t timecode;
@@ -2181,7 +2192,9 @@ static void index_block(demuxer_t *demuxer, struct block_info *block)
     mkv_demuxer_t *mkv_d = (mkv_demuxer_t *) demuxer->priv;
     if (block->keyframe) {
         add_block_position(demuxer, block->track, mkv_d->cluster_start,
-                           block->timecode / mkv_d->tc_scale);
+                           mkv_d->cluster_start - block->block_pos, // negative!
+                           block->timecode / mkv_d->tc_scale,
+                           block->duration / mkv_d->tc_scale);
     }
 }
 
@@ -2324,12 +2337,12 @@ static int handle_block(demuxer_t *demuxer, struct block_info *block_info)
     return 0;
 }
 
-static int read_block_group(demuxer_t *demuxer, int64_t end,
+static int read_block_group(demuxer_t *demuxer, int64_t start, int64_t end,
                             struct block_info *block)
 {
     mkv_demuxer_t *mkv_d = (mkv_demuxer_t *) demuxer->priv;
     stream_t *s = demuxer->stream;
-    *block = (struct block_info){ .keyframe = true };
+    *block = (struct block_info){ .block_pos = start, .keyframe = true };
 
     while (stream_tell(s) < end) {
         switch (ebml_read_id(s, NULL)) {
@@ -2377,7 +2390,8 @@ static int read_next_block(demuxer_t *demuxer, struct block_info *block)
 
     while (1) {
         while (stream_tell(s) < mkv_d->cluster_end) {
-            int64_t start_filepos = stream_tell(s);
+            int64_t start_pos = stream_tell(s);
+            stream_peek(s, 4); // enough for MATROSKA_ID_CLUSTER
             switch (ebml_read_id(s, NULL)) {
             case MATROSKA_ID_TIMECODE: {
                 uint64_t num = ebml_read_uint(s, NULL);
@@ -2390,7 +2404,7 @@ static int read_next_block(demuxer_t *demuxer, struct block_info *block)
             case MATROSKA_ID_BLOCKGROUP: {
                 int64_t end = ebml_read_length(s, NULL);
                 end += stream_tell(s);
-                int res = read_block_group(demuxer, end, block);
+                int res = read_block_group(demuxer, start_pos, end, block);
                 if (res < 0)
                     goto find_next_cluster;
                 if (res > 0)
@@ -2399,7 +2413,10 @@ static int read_next_block(demuxer_t *demuxer, struct block_info *block)
             }
 
             case MATROSKA_ID_SIMPLEBLOCK: {
-                *block = (struct block_info){ .simple = true };
+                *block = (struct block_info){
+                    .block_pos = start_pos,
+                    .simple = true,
+                };
                 int res = read_block(demuxer, block);
                 if (res < 0)
                     goto find_next_cluster;
@@ -2409,8 +2426,8 @@ static int read_next_block(demuxer_t *demuxer, struct block_info *block)
             }
 
             case MATROSKA_ID_CLUSTER:
-                mkv_d->cluster_start = start_filepos;
-                goto next_cluster;
+                stream_seek(s, start_pos);
+                goto find_next_cluster;
 
             case EBML_ID_INVALID:
                 goto find_next_cluster;
@@ -2433,7 +2450,6 @@ static int read_next_block(demuxer_t *demuxer, struct block_info *block)
                 return -1;
             ebml_read_skip_or_resync_cluster(s, NULL);
         }
-    next_cluster:
         mkv_d->cluster_end = ebml_read_length(s, NULL);
         // mkv files for "streaming" can have this legally
         if (mkv_d->cluster_end != EBML_UINT_INVALID)
@@ -2523,6 +2539,55 @@ static int create_index_until(struct demuxer *demuxer, uint64_t timecode)
     return 0;
 }
 
+// Seek to Block directly using CueRelativePosition.
+// Returns false if you should seek normally.
+static bool seek_cue_relative(struct demuxer *demuxer, int64_t *pos,
+                              int block_offset)
+{
+    struct mkv_demuxer *mkv_d = demuxer->priv;
+    struct stream *s = demuxer->stream;
+    int64_t cluster = *pos;
+
+    // Unfortunately, we must seek to the Cluster too to get the timecode and
+    // to get the start offset (this crap is really misdesigned).
+    stream_seek(s, cluster);
+    uint32_t id = ebml_read_id(s, NULL);
+    if (id != MATROSKA_ID_CLUSTER)
+        return false;
+    mkv_d->cluster_start = cluster;
+    mkv_d->cluster_end = ebml_read_length(s, NULL);
+    // mkv files for "streaming" can have this legally
+    if (mkv_d->cluster_end != EBML_UINT_INVALID)
+        mkv_d->cluster_end += stream_tell(s);
+
+    int64_t dest = block_offset > 0
+                   ? stream_tell(s) + block_offset  // normal index
+                   : cluster - block_offset;        // internal index
+
+    // Read cluster properties. The Timecode element is specified to come first.
+    id = ebml_read_id(s, NULL);
+    if (id != MATROSKA_ID_TIMECODE)
+        return false;
+    uint64_t num = ebml_read_uint(s, NULL);
+    if (num == EBML_UINT_INVALID)
+        return false;
+    mkv_d->cluster_tc = num * mkv_d->tc_scale;
+
+    // Older mkvmerge versions write incorrect index data, and point the seek
+    // to a Block element instead of BlockGroup. So we must check this
+    // explicitly. (What a load of crap crap crap crap!)
+    stream_seek(s, dest);
+    stream_peek(s, 1);
+    id = ebml_read_id(s, NULL);
+    if (id != MATROSKA_ID_SIMPLEBLOCK && id != MATROSKA_ID_BLOCKGROUP) {
+        mp_msg(MSGT_DEMUX, MSGL_V, "[mkv] Broken CueRelativePosition\n");
+        return false;
+    }
+
+    *pos = dest;
+    return true;
+}
+
 static struct mkv_index *seek_with_cues(struct demuxer *demuxer, int seek_id,
                                         int64_t target_timecode, int flags)
 {
@@ -2557,7 +2622,10 @@ static struct mkv_index *seek_with_cues(struct demuxer *demuxer, int seek_id,
         }
 
     if (index) {        /* We've found an entry. */
-        uint64_t seek_pos = index->filepos;
+        int64_t seek_pos = index->filepos;
+
+        mkv_d->cluster_end = 0;
+
         if (mkv_d->subtitle_preroll) {
             uint64_t prev_target = 0;
             for (int i = 0; i < mkv_d->num_indexes; i++) {
@@ -2569,9 +2637,10 @@ static struct mkv_index *seek_with_cues(struct demuxer *demuxer, int seek_id,
             }
             if (prev_target)
                 seek_pos = prev_target;
+        } else if (index->block_offset != 0) {
+            seek_cue_relative(demuxer, &seek_pos, index->block_offset);
         }
 
-        mkv_d->cluster_end = 0;
         stream_seek(demuxer->stream, seek_pos);
     }
     return index;

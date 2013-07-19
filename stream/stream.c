@@ -374,6 +374,10 @@ int stream_read(stream_t *s, char *mem, int total)
 // Can read ahead at most STREAM_MAX_BUFFER_SIZE bytes.
 // The returned buffer becomes invalid on the next stream call, and you must
 // not write to it.
+//
+// This can also be used to guarantee that you can seek back: if you peek N
+// bytes successfully, you can read up to N bytes with stream_read(), and seek
+// back to the position you peeked from with stream_seek().
 struct bstr stream_peek(stream_t *s, int len)
 {
     assert(len >= 0);
