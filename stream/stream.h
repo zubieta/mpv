@@ -215,6 +215,12 @@ inline static int64_t stream_tell(stream_t *s)
     return s->pos + s->buf_pos - s->buf_len;
 }
 
+// Return number of buffered bytes. (Useful for optimization purposes.)
+inline static int stream_buffered(stream_t *s)
+{
+    return s->buf_len - s->buf_pos;
+}
+
 int stream_skip(stream_t *s, int64_t len);
 int stream_seek(stream_t *s, int64_t pos);
 int stream_read(stream_t *s, char *mem, int total);

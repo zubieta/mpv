@@ -1777,6 +1777,7 @@ static int demux_mkv_open(demuxer_t *demuxer, enum demux_check check)
         *demuxer->params->matroska_was_valid = true;
 
     while (1) {
+        stream_peek(s, 4);
         uint32_t id = ebml_read_id(s, NULL);
         if (s->eof) {
             mp_tmsg(MSGT_DEMUX, MSGL_WARN,

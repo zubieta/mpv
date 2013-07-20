@@ -274,20 +274,21 @@ int ebml_read_skip(stream_t *s, uint64_t *length)
  */
 int ebml_resync_cluster(stream_t *s)
 {
-    int64_t pos = stream_tell(s);
     uint32_t last_4_bytes = 0;
-    mp_msg(MSGT_DEMUX, MSGL_ERR, "[mkv] Corrupt file detected. "
-           "Trying to resync starting from position %"PRId64"...\n", pos);
+    mp_msg(MSGT_DEMUX, MSGL_ERR, "[mkv] Corrupt file detected. Trying to "
+           "resync starting from position %"PRId64"...\n", stream_tell(s));
     while (!s->eof) {
         // Assumes MATROSKA_ID_CLUSTER is 4 bytes, with no 0 bytes.
         if (last_4_bytes == MATROSKA_ID_CLUSTER) {
+            int64_t pos = stream_tell(s) - 4;
             mp_msg(MSGT_DEMUX, MSGL_ERR,
-                   "[mkv] Cluster found at %"PRId64".\n", pos - 4);
-            stream_seek(s, pos - 4);
+                   "[mkv] Cluster found at %"PRId64".\n", pos);
+            stream_seek(s, pos);
             return 0;
         }
+        if (stream_buffered(s) < 4)
+            stream_peek(s, STREAM_BUFFER_SIZE);
         last_4_bytes = (last_4_bytes << 8) | stream_read_char(s);
-        pos++;
     }
     return -1;
 }
