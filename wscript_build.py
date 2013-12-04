@@ -80,6 +80,16 @@ def build(ctx):
         source = "demux/ebml.c",
         target = "ebml_defs.c")
 
+    if ctx.dependency_satisfied('wayland-scanner'):
+
+        ctx.wayland_protocol_code(
+            source = "video/out/wayland/protocol/xdg-shell.xml",
+            target = "video/out/wayland/xdg-shell-protocol.c")
+
+        ctx.wayland_protocol_header(
+            source = "video/out/wayland/protocol/xdg-shell.xml",
+            target = "video/out/wayland/xdg-shell-protocol.h")
+
     getch2_c = {
         'win32':  'osdep/terminal-win.c',
     }.get(ctx.env.DEST_OS, "osdep/terminal-unix.c")
@@ -371,6 +381,7 @@ def build(ctx):
         ( "video/out/wayland_common.c",          "wayland" ),
         ( "video/out/wayland/buffer.c",          "wayland" ),
         ( "video/out/wayland/memfile.c",         "wayland" ),
+        ( "video/out/wayland/xdg-shell-protocol.c", "wayland" ),
         ( "video/out/win_state.c"),
         ( "video/out/x11_common.c",              "x11" ),
 

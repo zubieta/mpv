@@ -125,11 +125,10 @@ struct priv {
     int width;  // width of the original image
     int height;
 
-    int x, y; // coords for resizing
-
     struct wl_surface *osd_surfaces[MAX_OSD_PARTS];
     struct wl_subsurface *osd_subsurfaces[MAX_OSD_PARTS];
     shm_buffer_t *osd_buffers[MAX_OSD_PARTS];
+
     // this id tells us if the subtitle part has changed or not
     int bitmap_pos_id[MAX_OSD_PARTS];
 
@@ -280,8 +279,6 @@ static bool resize(struct priv *p)
     if (SHM_BUFFER_IS_BUSY(p->video_bufpool.back_buffer))
         return false; // skip resizing if we can't garantuee pixel perfectness!
 
-    int32_t x = wl->window.sh_x;
-    int32_t y = wl->window.sh_y;
     wl->vo->dwidth = wl->window.sh_width;
     wl->vo->dheight = wl->window.sh_height;
 
@@ -297,12 +294,6 @@ static bool resize(struct priv *p)
                                             wl->window.height,
                                             p->dst_w,
                                             p->dst_h);
-
-    if (x != 0)
-        x = wl->window.width - p->dst_w;
-
-    if (y != 0)
-        y = wl->window.height - p->dst_h;
 
     mp_sws_set_from_cmdline(p->sws, p->vo->opts->sws_opts);
     p->sws->src = p->in_format;
@@ -337,13 +328,10 @@ static bool resize(struct priv *p)
         wl_region_destroy(opaque);
     }
 
-    p->x = x;
-    p->y = y;
     p->wl->window.events = 0;
     p->vo->want_redraw = true;
     return true;
 }
-
 
 /* wayland listeners */
 
@@ -373,7 +361,7 @@ static void frame_handle_redraw(void *data,
     struct vo_wayland_state *wl = p->wl;
     shm_buffer_t *buf = buffer_pool_get_front(&p->video_bufpool);
 
-    wl_surface_attach(wl->window.video_surface, buf->buffer, p->x, p->y);
+    wl_surface_attach(wl->window.video_surface, buf->buffer, 0, 0);
     wl_surface_damage(wl->window.video_surface, 0, 0, p->dst_w, p->dst_h);
 
     if (callback)
@@ -384,8 +372,6 @@ static void frame_handle_redraw(void *data,
     wl_surface_commit(wl->window.video_surface);
     buffer_finalise_front(buf);
 
-    p->x = 0;
-    p->y = 0;
     p->recent_flip_time = mp_time_us();
 }
 
