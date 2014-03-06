@@ -105,6 +105,8 @@ struct priv {
     struct vo *vo;
     struct vo_wayland_state *wl;
 
+    struct wl_viewport *viewport; // optional scaler in case swscale is not available
+
     struct wl_list format_list;
     const format_t *video_format; // pointer to element in supported_format list
 
@@ -137,6 +139,7 @@ struct priv {
     // options
     int enable_alpha;
     int use_rgb565;
+    int use_viewport;
 };
 
 static bool is_alpha_format(const format_t *fmt)
@@ -297,22 +300,42 @@ static bool resize(struct priv *p)
 
     mp_sws_set_from_cmdline(p->sws, p->vo->opts->sws_opts);
     p->sws->src = p->in_format;
-    p->sws->dst = (struct mp_image_params) {
-        .imgfmt = p->video_format->mp_format,
-        .w = p->dst_w,
-        .h = p->dst_h,
-        .d_w = p->dst_w,
-        .d_h = p->dst_h,
-    };
+    if (p->use_viewport) {
+        p->sws->dst = (struct mp_image_params) {
+            .imgfmt = p->video_format->mp_format,
+            .w = p->width,
+            .h = p->height,
+            .d_w = p->width,
+            .d_h = p->height,
+        };
+    }
+    else {
+        p->sws->dst = (struct mp_image_params) {
+            .imgfmt = p->video_format->mp_format,
+            .w = p->dst_w,
+            .h = p->dst_h,
+            .d_w = p->dst_w,
+            .d_h = p->dst_h,
+        };
+    }
 
     mp_image_params_guess_csp(&p->sws->dst);
 
     if (mp_sws_reinit(p->sws) < 0)
         return false;
 
-    if (!buffer_pool_resize(&p->video_bufpool, p->dst_w, p->dst_h)) {
-        MP_ERR(wl, "failed to resize video buffers\n");
-        return false;
+    if (p->use_viewport) {
+        wl_viewport_set(p->viewport,
+                        wl_fixed_from_int(0), wl_fixed_from_int(0),
+                        wl_fixed_from_int(p->width), wl_fixed_from_int(p->height),
+                        p->dst_w, p->dst_h);
+    }
+    else {
+        // use swscale
+        if (!buffer_pool_resize(&p->video_bufpool, p->dst_w, p->dst_h)) {
+            MP_ERR(wl, "failed to resize video buffers\n");
+            return false;
+        }
     }
 
     wl->window.width = p->dst_w;
@@ -615,6 +638,9 @@ static void uninit(struct vo *vo)
         wl_surface_destroy(p->osd_surfaces[i]);
     }
 
+    if (p->viewport)
+        wl_viewport_destroy(p->viewport);
+
     vo_wayland_uninit(vo);
 }
 
@@ -655,6 +681,16 @@ static int preinit(struct vo *vo)
         wl_subsurface_set_sync(p->osd_subsurfaces[i]);
     }
     wl_region_destroy(input);
+
+    if (p->use_viewport && wl->display.scaler == NULL) {
+        MP_WARN(wl, "No wl_scaler interface available\n"
+                    "Falling back to software scaling\n");
+        p->use_viewport = 0;
+    }
+
+    if (p->use_viewport)
+        p->viewport = wl_scaler_get_viewport(wl->display.scaler,
+                                             wl->window.video_surface);
 
     return 0;
 }
@@ -709,7 +745,11 @@ const struct vo_driver video_out_wayland = {
     .options = (const struct m_option[]) {
         OPT_FLAG("alpha", enable_alpha, 0),
         OPT_FLAG("rgb565", use_rgb565, 0),
+        OPT_FLAG("viewport", use_viewport, 0),
         {0}
+    },
+    .priv_defaults = &(const struct priv) {
+        .use_viewport = 1
     },
 };
 
