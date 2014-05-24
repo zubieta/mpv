@@ -35,11 +35,13 @@
 #include "libmpv/client.h"
 
 extern const struct mp_scripting mp_scripting_lua;
+extern const struct mp_scripting mp_scripting_udp_sync;
 
 static const struct mp_scripting *scripting_backends[] = {
 #if HAVE_LUA
     &mp_scripting_lua,
 #endif
+    &mp_scripting_udp_sync,
     NULL
 };
 
@@ -77,10 +79,10 @@ static void *script_thread(void *p)
     struct thread_arg *arg = p;
     struct mp_log *log = mp_client_get_log(arg->client);
 
-    mp_verbose(log, "Loading script...\n");
+    mp_verbose(log, "Loading...\n");
 
     if (arg->backend->load(arg->client, arg->fname) < 0)
-        mp_err(log, "Could not load script %s\n", arg->fname);
+        mp_err(log, "Could not load %s\n", arg->fname);
 
     mp_verbose(log, "Exiting...\n");
 

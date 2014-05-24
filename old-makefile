@@ -155,6 +155,7 @@ SOURCES = audio/audio.c \
           common/msg.c \
           common/playlist.c \
           common/tags.c \
+          common/udp_sync.c \
           common/version.c \
           demux/codec_tags.c \
           demux/demux.c \

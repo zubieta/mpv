@@ -167,6 +167,7 @@ def build(ctx):
         ( "common/tags.c" ),
         ( "common/msg.c" ),
         ( "common/playlist.c" ),
+        ( "common/udp_sync.c" ),
         ( "common/version.c" ),
 
         ## Demuxers
