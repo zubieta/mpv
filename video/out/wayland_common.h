@@ -97,7 +97,10 @@ struct vo_wayland_state {
         int32_t sh_height;
         float aspect;
 
-        bool is_fullscreen; // don't keep aspect ratio in fullscreen mode
+        struct {
+            bool fullscreen; // don't keep aspect ratio in fullscreen mode
+        } state;
+
         int32_t fs_width;   // fullscreen sizes
         int32_t fs_height;
 
