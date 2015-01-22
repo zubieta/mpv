@@ -1,0 +1,8 @@
+# vi: ft=yaml
+
+BasedOnStyle: LLVM
+IndentWidth: 4
+UseTab: false
+BreakBeforeBraces: Stroustrup # Linux would break event after `struct name {`
+AllowShortIfStatementsOnASingleLine: false
+IndentCaseLabels: false
