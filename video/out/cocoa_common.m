@@ -27,6 +27,7 @@
 #import "video/out/cocoa/video_view.h"
 #import "video/out/cocoa/mpvadapter.h"
 
+#include "osdep/timer.h"
 #include "osdep/threads.h"
 #include "osdep/macosx_compat.h"
 #include "osdep/macosx_events_objc.h"
@@ -62,7 +63,9 @@ struct vo_cocoa_state {
 
     NSScreen *current_screen;
     NSScreen *fs_screen;
+    CVDisplayLinkRef display_link;
     double screen_fps;
+    int64_t last_flip;
 
     NSInteger window_level;
 
@@ -146,6 +149,20 @@ static void set_application_icon(NSApplication *app)
     [pool release];
 }
 
+static CVReturn display_link_cb(CVDisplayLinkRef display_link,
+                                const CVTimeStamp *now,
+                                const CVTimeStamp *vsync,
+                                CVOptionFlags flags_in,
+                                CVOptionFlags *flags_out,
+                                void *ctx)
+{
+    struct vo *vo = ctx;
+    uint64_t mp_now = mp_time_us();
+    vo->cocoa->last_flip = mp_now + (uint64_t) (now->hostTime / 1e6) -
+                                    (uint64_t) (vsync->hostTime / 1e6);
+    return kCVReturnSuccess;
+}
+
 int vo_cocoa_init(struct vo *vo)
 {
     struct vo_cocoa_state *s = talloc_zero(vo, struct vo_cocoa_state);
@@ -156,6 +173,9 @@ int vo_cocoa_init(struct vo *vo)
         .embedded = vo->opts->WinID >= 0,
     };
     mpthread_mutex_init_recursive(&s->mutex);
+    CVDisplayLinkCreateWithActiveCGDisplays(&s->display_link);
+    CVDisplayLinkSetOutputCallback(s->display_link, display_link_cb, (void *)vo);
+    CVDisplayLinkStart(s->display_link);
     vo->cocoa = s;
     return 1;
 }
@@ -191,6 +211,9 @@ void vo_cocoa_uninit(struct vo *vo)
 {
     struct vo_cocoa_state *s = vo->cocoa;
     NSView *ev = s->view;
+
+    CVDisplayLinkStop(s->display_link);
+    CVDisplayLinkRelease(s->display_link);
 
     // keep the event view around for later in order to call -clear
     if (!s->embedded) {
@@ -264,6 +287,8 @@ static void vo_cocoa_update_screen_fps(struct vo *vo)
     NSDictionary* sinfo = [screen deviceDescription];
     NSNumber* sid = [sinfo objectForKey:@"NSScreenNumber"];
     CGDirectDisplayID did = [sid longValue];
+    CVDisplayLinkSetCurrentCGDisplay(s->display_link, did);
+
     CGDisplayModeRef mode = CGDisplayCopyDisplayMode(did);
     s->screen_fps = CGDisplayModeGetRefreshRate(mode);
     CGDisplayModeRelease(mode);
@@ -678,6 +703,11 @@ int vo_cocoa_control(struct vo *vo, int *events, int request, void *arg)
     case VOCTRL_GET_DISPLAY_FPS:
         if (vo->cocoa->screen_fps > 0.0) {
             *(double *)arg = vo->cocoa->screen_fps;
+            return VO_TRUE;
+        }
+    case VOCTRL_GET_RECENT_FLIP_TIME:
+        if (vo->cocoa->last_flip) {
+            *(int64_t *)arg = vo->cocoa->last_flip;
             return VO_TRUE;
         }
     }
