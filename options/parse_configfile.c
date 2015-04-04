@@ -30,6 +30,7 @@
 #include "common/common.h"
 #include "common/msg.h"
 #include "misc/ctype.h"
+#include "misc/json.h"
 #include "m_option.h"
 #include "m_config.h"
 
@@ -89,8 +90,9 @@ static int m_config_parse(m_config_t *config, const char *location, bstr data,
         option.len = option.len - line.len;
         skip_ws(&line);
 
-        bstr value = {0};
+        struct mpv_node node = {.format = 0};
         if (bstr_eatstart0(&line, "=")) {
+            bstr value = {0};
             skip_ws(&line);
             if (line.len && (line.start[0] == '"' || line.start[0] == '\'')) {
                 // Simple quoting, like "value"
@@ -118,6 +120,28 @@ static int m_config_parse(m_config_t *config, const char *location, bstr data,
                 value = bstr_strip(end < 0 ? line : bstr_splice(line, 0, end));
                 line.len = 0;
             }
+            node.format = MPV_FORMAT_STRING;
+            node.u.string = bstrto0(tmp, value);
+        } else if (bstr_eatstart0(&line, ":")) {
+            // JSON values.
+            // Find out where into the original string line points. This is
+            // sketchy, but happens to work.
+            bstr ball = {line.start, &data.start[data.len] - line.start};
+            char *all = bstrto0(tmp, ball); // json_parse() is destructive
+            char *start = all;
+            if (json_parse(tmp, &node, &all, 50) < 0) {
+                MP_ERR(config, "%s error parsing JSON value.\n", loc);
+                goto error;
+            }
+            // Awkwardly recompute where the json ends. If it skipped
+            // newlines, we also have to update the line number.
+            int skipped = all - start;
+            for (int n = 0; n < skipped; n++) {
+                if (ball.start[n] == '\n')
+                    line_no++;
+            }
+            data = bstr_cut(ball, skipped);
+            line = bstr_getline(data, &data);
         }
         if (skip_ws(&line)) {
             MP_ERR(config, "%s unparseable extra characters: '%.*s'\n",
@@ -127,6 +151,11 @@ static int m_config_parse(m_config_t *config, const char *location, bstr data,
 
         int res;
         if (profile) {
+            if (node.format != MPV_FORMAT_STRING) {
+                MP_ERR(config, "%s only strings allowed in profile sections\n", loc);
+                goto error;
+            }
+            bstr value = bstr0(node.u.string);
             if (bstr_equals0(option, "profile-desc")) {
                 m_profile_set_desc(profile, value);
                 res = 0;
@@ -134,11 +163,13 @@ static int m_config_parse(m_config_t *config, const char *location, bstr data,
                 res = m_config_set_profile_option(config, profile, option, value);
             }
         } else {
-            res = m_config_set_option_ext(config, option, value, flags);
+            res = m_config_set_option_node(config, option, &node, flags);
         }
         if (res < 0) {
-            MP_ERR(config, "%s setting option %.*s='%.*s' failed.\n",
-                   loc, BSTR_P(option), BSTR_P(value));
+            char *s = talloc_strdup(tmp, "");
+            json_write(&s, &node);
+            MP_ERR(config, "%s setting option %.*s=%s failed.\n",
+                   loc, BSTR_P(option), s);
             goto error;
         }
 
