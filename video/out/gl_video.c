@@ -347,26 +347,6 @@ const struct gl_video_opts gl_video_opts_def = {
     .gamma = 1.0f,
 };
 
-const struct gl_video_opts gl_video_opts_hq_def = {
-    .dither_depth = 0,
-    .dither_size = 6,
-    .fbo_format = GL_RGBA16,
-    .fancy_downscaling = 1,
-    .sigmoid_center = 0.75,
-    .sigmoid_slope = 6.5,
-    .sigmoid_upscaling = 1,
-    .scaler = {
-        {{"spline36",   .params={NAN, NAN}}, {.params = {NAN, NAN}}}, // scale
-        {{"mitchell",   .params={NAN, NAN}}, {.params = {NAN, NAN}}}, // dscale
-        {{"spline36",   .params={NAN, NAN}}, {.params = {NAN, NAN}}}, // cscale
-        {{"robidoux",   .params={NAN, NAN}}, {.params = {NAN, NAN}}}, // tscale
-    },
-    .alpha_mode = 2,
-    .background = {0, 0, 0, 255},
-    .gamma = 1.0f,
-    .blend_subs = 0,
-};
-
 static int validate_scaler_opt(struct mp_log *log, const m_option_t *opt,
                                struct bstr name, struct bstr param);
 

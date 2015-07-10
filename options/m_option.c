@@ -2635,8 +2635,11 @@ static int get_obj_param(struct mp_log *log, bstr opt_name, bstr obj_name,
 {
     int r;
 
-    if (!config)
-        return 0; // skip
+    if (!config) { // skip
+        *out_name = name;
+        *out_val = val;
+        return 1;
+    }
 
     // va.start != NULL => of the form name=val (not positional)
     // If it's just "name", and the associated option exists and is a flag,

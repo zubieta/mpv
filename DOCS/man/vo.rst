@@ -290,6 +290,23 @@ Available video output drivers are:
     color space conversion and chroma upsampling is generally in the hand of
     the hardware decoder APIs.
 
+    There is a high quality preset, which can be selected with
+    ``--profile=opengl-hq``. This sets the ``opengl`` VO, but also applies
+    a bunch of different default settings. It is almost equivalent to::
+
+        --vo=opengl:scale=spline36:cscale=spline36:dscale=mitchell:dither-depth=auto:fancy-downscaling:sigmoid-upscaling
+
+    You can list the actual profile contents with ``--show-profile=opengl-hq``.
+    Sometimes you can achieve better quality or performance by changing the
+    ``fbo-format`` suboption to ``rgb16f``, ``rgb32f`` or ``rgb``. Known
+    problems include Mesa/Intel not accepting ``rgb16``, Mesa sometimes not
+    being compiled with float texture support, and some OS X setups being very
+    slow with ``rgb16`` but fast with ``rgb32f``.
+
+    Note that some cheaper LCDs do dithering that gravely interferes with
+    ``opengl``'s dithering. Disabling dithering with ``dither-depth=no`` helps.
+
+
     ``scale=<filter>``
 
         ``bilinear``
@@ -806,21 +823,10 @@ Available video output drivers are:
         See ``--osd-color`` option how colors are defined.
 
 ``opengl-hq``
-    Same as ``opengl``, but with default settings for high quality rendering.
-
-    This is equivalent to::
-
-        --vo=opengl:scale=spline36:cscale=spline36:dscale=mitchell:dither-depth=auto:fancy-downscaling:sigmoid-upscaling
-
-    Note that some cheaper LCDs do dithering that gravely interferes with
-    ``opengl``'s dithering. Disabling dithering with ``dither-depth=no`` helps.
-
-    Unlike ``opengl``, ``opengl-hq`` makes use of FBOs by default. Sometimes you
-    can achieve better quality or performance by changing the ``fbo-format``
-    suboption to ``rgb16f``, ``rgb32f`` or ``rgb``. Known problems include
-    Mesa/Intel not accepting ``rgb16``, Mesa sometimes not being compiled with
-    float texture support, and some OS X setups being very slow with ``rgb16``
-    but fast with ``rgb32f``.
+    Deprecated. This merely selected a specific ``opengl`` preset, which is
+    now done with ``--profile=opengl-hq``. This VO entry does not exist, but
+    is explicitly handled to some degree after option parsing for the sake
+    of compatibility.
 
 ``sdl``
     SDL 2.0+ Render video output driver, depending on system with or without

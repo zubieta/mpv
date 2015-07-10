@@ -473,12 +473,10 @@ static const struct m_option options[] = {
     {0},
 };
 
-#define CAPS VO_CAP_ROTATE90
-
 const struct vo_driver video_out_opengl = {
     .description = "Extended OpenGL Renderer",
     .name = "opengl",
-    .caps = CAPS,
+    .caps = VO_CAP_ROTATE90,
     .preinit = preinit,
     .query_format = query_format,
     .reconfig = reconfig,
@@ -487,23 +485,5 @@ const struct vo_driver video_out_opengl = {
     .flip_page = flip_page,
     .uninit = uninit,
     .priv_size = sizeof(struct gl_priv),
-    .options = options,
-};
-
-const struct vo_driver video_out_opengl_hq = {
-    .description = "Extended OpenGL Renderer (high quality rendering preset)",
-    .name = "opengl-hq",
-    .caps = CAPS,
-    .preinit = preinit,
-    .query_format = query_format,
-    .reconfig = reconfig,
-    .control = control,
-    .draw_frame = draw_frame,
-    .flip_page = flip_page,
-    .uninit = uninit,
-    .priv_size = sizeof(struct gl_priv),
-    .priv_defaults = &(const struct gl_priv){
-        .renderer_opts = (struct gl_video_opts *)&gl_video_opts_hq_def,
-    },
     .options = options,
 };

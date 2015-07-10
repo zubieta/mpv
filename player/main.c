@@ -117,6 +117,11 @@ static const char def_config[] =
     "input-media-keys=no\n"
     "input-app-events=no\n"
     "stop-playback-on-init-failure=yes\n"
+    "\n"
+    "[opengl-hq]\n"
+    "vo=opengl\n"
+    "vo-defaults=opengl:scale=spline36:cscale=spline36:dscale=mitchell:"
+                       "dither-depth=auto:fancy-downscaling:sigmoid-upscaling\n"
 #if HAVE_ENCODING
     "\n"
     "[encoding]\n"
@@ -307,6 +312,26 @@ static bool handle_help_options(struct MPContext *mpctx)
     return opt_exit;
 }
 
+extern const struct m_obj_list vo_obj_list;
+
+static void handle_deprecated_options(struct MPContext *mpctx)
+{
+    struct MPOpts *opts = mpctx->opts;
+    struct m_obj_settings *vo = opts->vo.video_driver_list;
+    if (vo && vo->name && strcmp(vo->name, "opengl-hq") == 0) {
+        MP_WARN(mpctx,
+            "--vo=opengl-hq is deprecated! Use --profile=opengl-hq instead.\n");
+        // Fudge it. This will replace the --vo option too, which is why we
+        // unset/safe it, and later restore it.
+        opts->vo.video_driver_list = NULL;
+        m_config_set_profile(mpctx->mconfig, "opengl-hq", 0);
+        talloc_free(vo->name);
+        vo->name = talloc_strdup(NULL, "opengl");
+        m_option_type_obj_settings_list.free(&opts->vo.video_driver_list);
+        opts->vo.video_driver_list = vo;
+    }
+}
+
 static int cfg_include(void *ctx, char *filename, int flags)
 {
     struct MPContext *mpctx = ctx;
@@ -414,6 +439,8 @@ int mp_initialize(struct MPContext *mpctx, char **options)
 
     if (handle_help_options(mpctx))
         return -2;
+
+    handle_deprecated_options(mpctx);
 
     if (opts->dump_stats && opts->dump_stats[0]) {
         if (mp_msg_open_stats_file(mpctx->global, opts->dump_stats) < 0)
