@@ -49,6 +49,22 @@ static int GLAPIENTRY w32_swap_interval(int interval)
     return 0;
 }
 
+static void enable_transparency(struct MPGLContext *ctx,
+                                PIXELFORMATDESCRIPTOR *pfd)
+{
+    HWND win = vo_w32_hwnd(ctx->vo);
+    pfd->dwFlags |= PFD_SUPPORT_COMPOSITION;
+    pfd->cAlphaBits = 8;
+    pfd->cColorBits += pfd->cAlphaBits;
+
+    DWM_BLURBEHIND bb = {
+        .hRgnBlur = CreateRectRgn(0, 0, -1, -1),
+        .dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION,
+        .fEnable = TRUE,
+    };
+    DwmEnableBlurBehindWindow(win, &bb);
+}
+
 static bool create_dc(struct MPGLContext *ctx, int flags)
 {
     struct w32_context *w32_ctx = ctx->priv;
@@ -70,6 +86,10 @@ static bool create_dc(struct MPGLContext *ctx, int flags)
     pfd.iPixelType = PFD_TYPE_RGBA;
     pfd.cColorBits = 24;
     pfd.iLayerType = PFD_MAIN_PLANE;
+
+    if (flags & VOFLAG_ALPHA)
+        enable_transparency(ctx, &pfd);
+
     int pf = ChoosePixelFormat(hdc, &pfd);
 
     if (!pf) {
@@ -221,6 +241,7 @@ static void create_ctx(void *ptr)
         ctx->gl->fb_g = pfd.cGreenBits;
         ctx->gl->fb_b = pfd.cBlueBits;
     }
+    ctx->gl->fb_premultiplied = true;
 
     wglMakeCurrent(w32_ctx->hdc, NULL);
 }

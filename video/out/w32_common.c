@@ -688,8 +688,8 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam,
         // This message is used to wakeup the GUI thread, see wakeup_gui_thread.
         mp_dispatch_queue_process(w32->dispatch, 0);
         break;
-    case WM_ERASEBKGND: // no need to erase background separately
-        return 1;
+    //case WM_ERASEBKGND: // no need to erase background separately
+    //    return 1;
     case WM_PAINT:
         signal_events(w32, VO_EVENT_EXPOSE);
         break;
@@ -1192,6 +1192,7 @@ static void *gui_thread(void *ptr)
         .hIcon = LoadIconW(hInstance, L"IDI_ICON1"),
         .hCursor = LoadCursor(NULL, IDC_ARROW),
         .lpszClassName = classname,
+        .hbrBackground = CreateSolidBrush(0x00000000),
     };
     RegisterClassExW(&wcex);
 
@@ -1209,7 +1210,7 @@ static void *gui_thread(void *ptr)
                                       0, 0, r.right, r.bottom,
                                       w32->parent, 0, hInstance, NULL);
     } else {
-        w32->window = CreateWindowExW(0, classname,
+        w32->window = CreateWindowExW(WS_EX_APPWINDOW, classname,
                                       classname,
                                       update_style(w32, 0),
                                       CW_USEDEFAULT, SW_HIDE, 100, 100,
