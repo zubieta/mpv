@@ -739,18 +739,24 @@ static int vo_cocoa_fullscreen(struct vo *vo)
 
     vo_cocoa_update_screen_info(vo, NULL);
 
-    draw_changes_after_next_frame(vo);
-    [(MpvEventsView *)s->view setFullScreen:opts->fullscreen];
+    if (opts->fs_mission_control) {
+        [(MpvVideoWindow *)s->window setFullScreen:opts->fullscreen];
+        // for whatever reason sometimes cocoa doesn't create an up event on
+        // the fullscreen input key
+        cocoa_put_key(MP_INPUT_RELEASE_ALL);
+    } else {
+        draw_changes_after_next_frame(vo);
 
-    if ([s->view window] != s->window) {
-        // cocoa implements fullscreen views by moving the view to a fullscreen
-        // window. Set that window delegate to the cocoa adapter to trigger
-        // calls to -windowDidResignKey: and -windowDidBecomeKey:
-        [[s->view window] setDelegate:s->adapter];
+        [(MpvEventsView *)s->view setFullScreen:opts->fullscreen];
+
+        if ([s->view window] != s->window) {
+            // cocoa implements fullscreen views by moving the view to a
+            // fullscreen // window. Set that window delegate to the cocoa
+            // adapter to trigger calls to -windowDidResignKey: and
+            // -windowDidBecomeKey:
+            [[s->view window] setDelegate:s->adapter];
+        }
     }
-
-    flag_events(vo, VO_EVENT_ICC_PROFILE_CHANGED);
-    resize_event(vo);
 
     return VO_TRUE;
 }

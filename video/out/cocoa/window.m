@@ -32,6 +32,8 @@
 
 @implementation MpvVideoWindow {
     NSSize _queued_video_size;
+    NSRect _unfs_frame;
+    BOOL _isFs;
 }
 
 @synthesize adapter = _adapter;
@@ -48,6 +50,54 @@
         [self setMinSize:NSMakeSize(50,50)];
     }
     return self;
+}
+
+- (void)setFullScreen:(BOOL)willBeFullscreen {
+    [self setCollectionBehavior:(NSWindowCollectionBehaviorFullScreenPrimary)];
+
+    if (willBeFullscreen != _isFs) {
+        [self toggleFullScreen:nil];
+    }
+}
+
+- (void)toggleFullScreen:(id)sender {
+    _isFs = !_isFs;
+    [super toggleFullScreen:sender];
+}
+
+- (NSSize)window:(NSWindow *)window willUseFullScreenContentSize:(NSSize)size {
+    return window.screen.frame.size;
+}
+
+- (NSApplicationPresentationOptions)window:(NSWindow *)window
+      willUseFullScreenPresentationOptions:(NSApplicationPresentationOptions)opts {
+    return NSApplicationPresentationFullScreen      |
+           NSApplicationPresentationAutoHideDock    |
+           NSApplicationPresentationAutoHideMenuBar |
+           NSApplicationPresentationAutoHideToolbar;
+}
+
+- (NSArray *)customWindowsToEnterFullScreenForWindow:(NSWindow *)window {
+    return @[self];
+}
+
+- (NSArray*)customWindowsToExitFullScreenForWindow:(NSWindow*)window {
+    return @[self];
+}
+
+- (void)window:window startCustomAnimationToEnterFullScreenWithDuration:(NSTimeInterval)duration
+{
+    [window setStyleMask:([window styleMask] | NSFullScreenWindowMask)];
+    _unfs_frame = [window frame];
+    NSScreen *screen = [window screen];
+    NSRect screenFrame = [screen frame];
+    [window setFrame:screenFrame display:YES];
+}
+
+- (void)window:window startCustomAnimationToExitFullScreenWithDuration:(NSTimeInterval)duration
+{
+    [window setStyleMask:([window styleMask] & ~NSFullScreenWindowMask)];
+    [window setFrame:_unfs_frame display:YES];
 }
 
 - (void)windowDidChangeBackingProperties:(NSNotification *)notification

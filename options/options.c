@@ -474,6 +474,9 @@ const m_option_t mp_opts[] = {
                       ({"all", -2}, {"current", -1})),
 
     OPT_FLAG("fs-black-out-screens", vo.fs_black_out_screens, 0),
+#if HAVE_COCOA
+    OPT_FLAG("fs-mission-control", vo.fs_mission_control, 0, OPTDEF_INT(1)),
+#endif
     OPT_INTRANGE("brightness", gamma_brightness, 0, -100, 100),
     OPT_INTRANGE("saturation", gamma_saturation, 0, -100, 100),
     OPT_INTRANGE("contrast", gamma_contrast, 0, -100, 100),
