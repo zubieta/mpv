@@ -47,7 +47,7 @@ def check_iconv(ctx, dependency_identifier):
     libdliconv = " ".join(ctx.env.LIB_LIBDL + ['iconv'])
     libs       = ['iconv', libdliconv]
     args       = {'fragment': iconv_program}
-    if ctx.env.DEST_OS == 'darwin':
+    if ctx.env.DEST_OS == 'openbsd':
         args['cflags'] = '-I/usr/local/include'
         args['linkflags'] = '-L/usr/local/lib'
     checkfn = check_cc(**args)
