@@ -261,18 +261,6 @@ static int configure_lavrr(struct af_instance *af, struct mp_audio *in,
 
     av_opt_set_double(s->avrctx, "cutoff",          s->opts.cutoff, 0);
 
-    int normalize = s->opts.normalize;
-    if (normalize < 0)
-        normalize = af->opts->audio_normalize;
-#if HAVE_LIBSWRESAMPLE
-    av_opt_set_double(s->avrctx, "rematrix_maxval", normalize ? 1 : 1000, 0);
-#else
-    av_opt_set_int(s->avrctx, "normalize_mix_level", !!normalize, 0);
-#endif
-
-    if (mp_set_avopts(af->log, s->avrctx, s->avopts) < 0)
-        goto error;
-
     struct mp_chmap map_in = in->channels;
     struct mp_chmap map_out = out->channels;
 
@@ -332,6 +320,18 @@ static int configure_lavrr(struct af_instance *af, struct mp_audio *in,
         mp_audio_set_channels(&s->pool_fmt, &map_out);
 
     out_ch_layout = fudge_layout_conversion(af, in_ch_layout, out_ch_layout);
+
+    int normalize = s->opts.normalize;
+    if (normalize < 0)
+        normalize = af->opts->audio_normalize;
+#if HAVE_LIBSWRESAMPLE
+    av_opt_set_double(s->avrctx, "rematrix_maxval", normalize ? 1 : 1000, 0);
+#else
+    av_opt_set_int(s->avrctx, "normalize_mix_level", !!normalize, 0);
+#endif
+
+    if (mp_set_avopts(af->log, s->avrctx, s->avopts) < 0)
+        goto error;
 
     // Real conversion; output is input to avrctx_out.
     av_opt_set_int(s->avrctx, "in_channel_layout",  in_ch_layout, 0);
