@@ -325,6 +325,13 @@ static int configure_lavrr(struct af_instance *af, struct mp_audio *in,
     if (normalize < 0)
         normalize = af->opts->audio_normalize;
 #if HAVE_LIBSWRESAMPLE
+    if (!normalize && in_lavc.num > out_lavc.num) {
+        int sample_fmt = AV_SAMPLE_FMT_FLTP;
+        if (af_fmt_is_float(s->out_format) && af_fmt_to_bytes(s->out_format) > 4)
+            sample_fmt = AV_SAMPLE_FMT_DBLP;
+        MP_VERBOSE(af, "Forcing internal_sample_fmt=%d\n", sample_fmt);
+        av_opt_set_int(s->avrctx_out, "internal_sample_fmt", sample_fmt, 0);
+    }
     av_opt_set_double(s->avrctx, "rematrix_maxval", normalize ? 1 : 1000, 0);
 #else
     av_opt_set_int(s->avrctx, "normalize_mix_level", !!normalize, 0);
