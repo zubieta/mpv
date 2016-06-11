@@ -699,8 +699,14 @@ void vo_cocoa_swap_buffers(struct vo *vo)
     pthread_mutex_lock(&s->lock);
     bool skip = s->pending_events & VO_EVENT_RESIZE;
     pthread_mutex_unlock(&s->lock);
+
     if (skip)
         return;
+
+    bool focus = [s->view lockFocusIfCanDraw];
+    if (!focus) {
+        return;
+    }
 
     CGLFlushDrawable(s->cgl_ctx);
 
@@ -709,6 +715,8 @@ void vo_cocoa_swap_buffers(struct vo *vo)
     s->frame_h = vo->dheight;
     pthread_cond_signal(&s->wakeup);
     pthread_mutex_unlock(&s->lock);
+
+    [s->view unlockFocus];
 
     if (atomic_compare_exchange_strong(&s->waiting_frame, &(bool){true}, false))
         NSEnableScreenUpdates();
