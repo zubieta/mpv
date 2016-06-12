@@ -64,23 +64,12 @@ static CGLError test_gl_version(struct vo *vo,
         (CGLPixelFormatAttribute) version,
         kCGLPFADoubleBuffer,
         kCGLPFAAccelerated,
-        #if MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_8
-        // leave this as the last entry of the array to not break the fallback
-        // code
-        kCGLPFASupportsAutomaticGraphicsSwitching,
-        #endif
         0
     };
 
     GLint npix;
     CGLError err;
     err = CGLChoosePixelFormat(attrs, pix, &npix);
-    if (err == kCGLBadAttribute) {
-        // kCGLPFASupportsAutomaticGraphicsSwitching is probably not supported
-        // by the current hardware. Falling back to not using it.
-        attrs[MP_ARRAY_SIZE(attrs) - 2] = 0;
-        err = CGLChoosePixelFormat(attrs, pix, &npix);
-    }
 
     if (err != kCGLNoError) {
         MP_ERR(vo, "error creating CGL pixel format: %s (%d)\n",
