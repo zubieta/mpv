@@ -18,6 +18,8 @@
 #include <initguid.h>
 #include <libavcodec/d3d11va.h>
 
+#include <assert.h>
+
 #include "lavc.h"
 #include "common/common.h"
 #include "common/av_common.h"
@@ -47,6 +49,7 @@ struct priv {
 
     struct d3d11va_decoder *decoder;
     struct mp_image_pool   *sw_pool;
+    struct mp_image_pool   *tex_pool;
 };
 
 struct d3d11va_surface {
@@ -179,13 +182,69 @@ static const struct d3d_decoded_format d3d11_formats[] = {
 static struct mp_image *d3d11va_update_image_attribs(struct lavc_ctx *s,
                                                      struct mp_image *img)
 {
-    ID3D11Texture2D *texture = (void *)img->planes[1];
+    struct priv *p = s->hwdec_priv;
+    HRESULT hr;
 
+    ID3D11Texture2D *texture = (void *)img->planes[1];
+    int subindex = (intptr_t)img->planes[2];
     if (!texture)
         return img;
 
     D3D11_TEXTURE2D_DESC texture_desc;
     ID3D11Texture2D_GetDesc(texture, &texture_desc);
+
+    struct mp_image *new =
+        mp_image_pool_get_no_alloc(p->tex_pool, IMGFMT_D3D11VA, img->w, img->h);
+    if (!new) {
+        D3D11_TEXTURE2D_DESC new_desc = {
+            .Width            = texture_desc.Width,
+            .Height           = texture_desc.Height,
+            .MipLevels        = 1,
+            .Format           = texture_desc.Format,
+            .SampleDesc.Count = 1,
+            .MiscFlags        = 0,
+            .ArraySize        = 1,
+            .Usage            = D3D11_USAGE_DEFAULT,
+            .BindFlags        = D3D11_BIND_DECODER | D3D11_BIND_SHADER_RESOURCE,
+            .CPUAccessFlags   = 0,
+        };
+        ID3D11Texture2D *new_texture = NULL;
+        hr = ID3D11Device_CreateTexture2D(p->device, &new_desc, NULL, &new_texture);
+        if (FAILED(hr)) {
+            MP_ERR(p, "Failed to create Direct3D11 texture: %s\n",
+                   mp_HRESULT_to_str(hr));
+            return img;
+        }
+        struct d3d11va_surface *surface = talloc_zero(NULL, struct d3d11va_surface);
+        surface->texture = new_texture;
+        new = mp_image_new_custom_ref(NULL, surface, d3d11va_release_img);
+        if (!new)
+            abort();
+
+        mp_image_setfmt(new, IMGFMT_D3D11VA);
+        mp_image_set_size(new, img->w, img->h);
+        new->planes[0] = NULL;
+        new->planes[1] = (void *)new_texture;
+        new->planes[2] = (void *)(intptr_t)0;
+        new->planes[3] = NULL;
+
+        mp_image_pool_add(p->tex_pool, new);
+        // ownership went to the pool, get it back
+        new = mp_image_pool_get_no_alloc(p->tex_pool, IMGFMT_D3D11VA, img->w, img->h);
+        assert(new);
+    }
+
+    ID3D11Texture2D *dst_texture = (void *)new->planes[1];
+
+    mp_image_copy_attributes(new, img);
+
+    ID3D11DeviceContext_CopySubresourceRegion(p->device_ctx,
+        (ID3D11Resource *)dst_texture, 0, 0, 0, 0,
+        (ID3D11Resource *)texture, subindex, NULL);
+
+    talloc_free(img);
+    img = new;
+
     for (int n = 0; n < MP_ARRAY_SIZE(d3d11_formats); n++) {
         if (d3d11_formats[n].dxfmt == texture_desc.Format) {
             img->params.hw_subfmt = d3d11_formats[n].mpfmt;
@@ -243,6 +302,8 @@ static int d3d11va_init_decoder(struct lavc_ctx *s, int w, int h)
     int ret = -1;
     struct priv *p = s->hwdec_priv;
     TA_FREEP(&p->decoder);
+
+    mp_image_pool_clear(p->tex_pool);
 
     ID3D11Texture2D *texture = NULL;
     void *tmp = talloc_new(NULL);
@@ -472,6 +533,8 @@ static void d3d11va_uninit(struct lavc_ctx *s)
     if (!p)
         return;
 
+    mp_image_pool_clear(p->tex_pool);
+
     talloc_free(p->decoder);
     av_freep(&s->avctx->hwaccel_context);
 
@@ -499,6 +562,7 @@ static int d3d11va_init(struct lavc_ctx *s)
         mp_check_gpu_memcpy(p->log, NULL);
         p->sw_pool = talloc_steal(p, mp_image_pool_new(17));
     }
+    p->tex_pool = talloc_steal(p, mp_image_pool_new(17));
 
     p->device = hwdec_devices_load(s->hwdec_devs, s->hwdec->type);
     if (p->device) {
