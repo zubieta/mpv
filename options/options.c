@@ -406,7 +406,7 @@ const m_option_t mp_opts[] = {
 
     OPT_FLAG("window-dragging", allow_win_drag, CONF_GLOBAL),
 
-    OPT_CHOICE("softvol", softvol, 0,
+    OPT_CHOICE("user-volume-mode", softvol, 0,
                ({"no", SOFTVOL_NO},
                 {"yes", SOFTVOL_YES},
                 {"auto", SOFTVOL_AUTO})),
@@ -687,6 +687,7 @@ const m_option_t mp_opts[] = {
     OPT_REPLACED("media-title", "force-media-title"),
     OPT_REPLACED("input-unix-socket", "input-ipc-server"),
     OPT_REPLACED("softvol-max", "volume-max"),
+    OPT_REPLACED("softvol", "user-volume-mode"),
 
     {0}
 };

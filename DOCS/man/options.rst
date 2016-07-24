@@ -1091,23 +1091,32 @@ Audio
 ``--no-audio``
     Do not play sound.
 
-``--mute=<auto|yes|no>``
-    Set startup audio mute status. ``auto`` (default) will not change the mute
-    status.
+``--mute=<yes|no|auto>``
+    Set startup audio mute status (default: no).
+
+    ``auto`` is a deprecated alias for ``no`` (before mpv 0.18.1 the situation
+    was different).
 
     See also: ``--volume``.
 
-``--softvol=<no|yes|auto>``
-    Deprecated/unfunctional. Before mpv 0.18.1, this used to control whether
+``--user-volume-mode=<no|yes|auto>``, ``--softvol=<...>``
+    Decides what the ``user-volume`` property controls (default: auto).
+
+    :no:        ``user-volume`` redirects to ``ao-volume`` (i.e. always changes
+                the audio API's volume control)
+    :yes:       ``user-volume`` redirects to ``volume`` (i.e. always changes the
+                internal mixer)
+    :auto:      control ``ao-volume`` if the audio API does per-application
+                audio control (like wasapi and PulseAudio), otherwise ``volume``
+
+    ``--softvol`` is a deprecated alias - it some situation it will appear to do
+    roughly the same as before mpv 0.18.1, while in others the different
+    implementation becomes apparent.
+
+    This is the behavior since mpv 0.18.2. In mpv 0.18.1, this option was
+    deprecated and did nothing. Before mpv 0.18.1, this used to control whether
     to use the volume controls of the audio output driver or the internal mpv
     volume filter.
-
-    The current behavior is as if this option was set to ``yes``. The other
-    behaviors are not available anymore, although ``auto`` almost matches
-    current behavior in most cases.
-
-    The ``no`` behavior is still partially available through the ``ao-volume``
-    and ``ao-mute`` properties. But there are no options to reset these.
 
 ``--audio-demuxer=<[+]name>``
     Use this audio demuxer type when using ``--audio-file``. Use a '+' before
@@ -1288,18 +1297,6 @@ Audio
     The application name the player reports to the audio API. Can be useful
     if you want to force a different audio profile (e.g. with PulseAudio),
     or to set your own application name when using libmpv.
-
-``--volume-restore-data=<string>``
-    Used internally for use by playback resume (e.g. with ``quit-watch-later``).
-    Restoring value has to be done carefully, because different AOs as well as
-    softvol can have different value ranges, and we don't want to restore
-    volume if setting the volume changes it system wide. The normal options
-    (like ``--volume``) would always set the volume. This option was added for
-    restoring volume in a safer way (by storing the method used to set the
-    volume), and is not generally useful. Its semantics are considered private
-    to mpv.
-
-    Do not use.
 
 ``--audio-buffer=<seconds>``
     Set the audio output minimum buffer. The audio device might actually create

@@ -1617,7 +1617,7 @@ static int mp_property_ao_volume(void *ctx, struct m_property *prop,
     MPContext *mpctx = ctx;
     struct ao *ao = mpctx->ao;
     if (!ao)
-        return M_PROPERTY_NOT_IMPLEMENTED;
+        return M_PROPERTY_UNAVAILABLE;
 
     switch (action) {
     case M_PROPERTY_SET: {
@@ -1660,7 +1660,7 @@ static int mp_property_ao_mute(void *ctx, struct m_property *prop,
     MPContext *mpctx = ctx;
     struct ao *ao = mpctx->ao;
     if (!ao)
-        return M_PROPERTY_NOT_IMPLEMENTED;
+        return M_PROPERTY_UNAVAILABLE;
 
     switch (action) {
     case M_PROPERTY_SET: {
@@ -1681,6 +1681,25 @@ static int mp_property_ao_mute(void *ctx, struct m_property *prop,
         return M_PROPERTY_OK;
     }
     return M_PROPERTY_NOT_IMPLEMENTED;
+}
+
+static int mp_property_user_volume(void *ctx, struct m_property *prop,
+                                   int action, void *arg)
+{
+    MPContext *mpctx = ctx;
+    struct ao *ao = mpctx->ao;
+    if (!ao)
+        return M_PROPERTY_UNAVAILABLE;
+
+    bool softvol;
+    switch (mpctx->opts->softvol) {
+    case SOFTVOL_NO: softvol = false; break;
+    case SOFTVOL_YES: softvol = true; break;
+    default:
+        softvol = ao_control(ao, AOCONTROL_HAS_PER_APP_VOLUME, NULL) != CONTROL_OK;
+    }
+
+    return mp_property_do(softvol ? "volume" : "ao-volume", action, arg, ctx);
 }
 
 static int get_device_entry(int item, int action, void *arg, void *ctx)
@@ -3702,6 +3721,7 @@ static const struct m_property mp_properties[] = {
     {"mute", mp_property_mute},
     {"ao-volume", mp_property_ao_volume},
     {"ao-mute", mp_property_ao_mute},
+    {"user-volume", mp_property_user_volume},
     {"audio-delay", mp_property_audio_delay},
     {"audio-codec-name", mp_property_audio_codec_name},
     {"audio-codec", mp_property_audio_codec},
@@ -3888,7 +3908,7 @@ static const char *const *const mp_event_property_change[] = {
       "colormatrix-output-range", "colormatrix-primaries", "video-aspect"),
     E(MPV_EVENT_AUDIO_RECONFIG, "audio-format", "audio-codec", "audio-bitrate",
       "samplerate", "channels", "audio", "volume", "mute", "balance",
-      "current-ao", "audio-codec-name", "audio-params",
+      "current-ao", "audio-codec-name", "audio-params", "user-volume",
       "audio-out-params", "volume-max", "mixer-active"),
     E(MPV_EVENT_SEEK, "seeking", "core-idle", "eof-reached"),
     E(MPV_EVENT_PLAYBACK_RESTART, "seeking", "core-idle", "eof-reached"),
@@ -4050,10 +4070,13 @@ static const struct property_osd_display {
     { "clock", "Clock" },
     // audio
     { "volume", "Volume",
-      .msg = "Volume: ${?volume:${volume}% ${?mute==yes:(Muted)}}${!volume:${volume}}",
+      .msg = "Internal volume: ${?volume:${volume}% ${?mute==yes:(Muted)}}${!volume:${volume}}",
       .osd_progbar = OSD_VOLUME },
     { "ao-volume", "AO Volume",
       .msg = "AO Volume: ${?ao-volume:${ao-volume}% ${?ao-mute==yes:(Muted)}}${!ao-volume:${ao-volume}}",
+      .osd_progbar = OSD_VOLUME },
+    { "user-volume", "Volume",
+      .msg = "Volume: ${?user-volume:${user-volume}% ${?mute==yes:(Muted)}}${!user-volume:${user-volume}}",
       .osd_progbar = OSD_VOLUME },
     { "mute", "Mute" },
     { "ao-mute", "AO Mute" },

@@ -20,10 +20,17 @@ Interface changes
 ::
 
  --- mpv 0.18.2 ---
+    - partially re-add --softvol=auto capability:
+        - rename --softvol to --user-volume-mode and undeprecate it
+        - implement selecting the "correct" volume control with the newly added
+          user-volume property
+        - change default key bindings to control user-volume instead of volume
+          (you will have to do the same with custom bindings)
+        - all of the above should restore most of PulseAudio behavior
     - deprecate "balance" option/property (no replacement)
  --- mpv 0.18.1 ---
     - deprecate --heartbeat-cmd
-    - remove --softvol=no capability:
+    - remove --softvol=no/--softvol=auto capability:
         - deprecate --softvol, it now does nothing
         - --volume, --mute, and the corresponding properties now always control
           softvol, and behave as expected without surprises (e.g. you can set

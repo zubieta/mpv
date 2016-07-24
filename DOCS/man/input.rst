@@ -1242,6 +1242,9 @@ Property list
 ``volume`` (RW)
     Current volume (see ``--volume`` for details).
 
+    See also ``user-volume``, in particular if you are interested in pre-
+    mpv 0.18.1 behavior.
+
 ``volume-max`` (RW)
     Current maximum value the volume property can be set to. (Equivalent to the
     ``--volume-max`` option.)
@@ -1259,6 +1262,15 @@ Property list
 ``ao-mute`` (RW)
     Similar to ``ao-volume``, but controls the mute state. May be unimplemented
     even if ``ao-volume`` works.
+
+``user-volume`` (RW)
+    This switches between the ``ao-volume`` or ``volume`` properties, depending
+    on the ``--user-volume-mode`` option.
+
+    In particular, this property is unavailable if the audio chain is not active
+    (such as when playing a file without audio, or in idle mode).
+
+    There is no such property for the mute control.
 
 ``audio-delay`` (RW)
     See ``--audio-delay``.
