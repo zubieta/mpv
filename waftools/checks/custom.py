@@ -4,7 +4,7 @@ from waflib import Utils
 import os
 
 __all__ = ["check_pthreads", "check_iconv", "check_lua", "check_oss_4front",
-           "check_cocoa"]
+           "check_cocoa", "check_rpi"]
 
 pthreads_program = load_fragment('pthreads.c')
 
@@ -116,3 +116,22 @@ def check_cocoa(ctx, dependency_identifier):
         linkflags        = '-fobjc-arc')
 
     return fn(ctx, dependency_identifier)
+
+def check_rpi(ctx, dependency_identifier):
+    kw = { 'use': inflector.storage_key(dependency_identifier) }
+    return compose_checks(
+        check_cc(cflags="-isystem/opt/vc/include/ "+
+                        "-isystem/opt/vc/include/interface/vcos/pthreads " +
+                        "-isystem/opt/vc/include/interface/vmcs_host/linux " +
+                        "-fgnu89-inline",
+                 linkflags="-L/opt/vc/lib",
+                 header_name="bcm_host.h",
+                 lib=['mmal_core', 'mmal_util', 'mmal_vc_client', 'bcm_host']),
+        # We still need all OpenGL symbols, because the vo_opengl code is
+        # generic and supports anything from GLES2/OpenGL 2.1 to OpenGL 4 core.
+        check_cc(lib="EGL", **kw),
+        check_cc(lib="GLESv2", **kw),
+        # arbitrary OpenGL 3.0 symbol
+        check_statement('GL/gl.h', '(void)GL_RGB32F', **kw),
+        # arbitrary OpenGL legacy-only symbol
+        check_statement('GL/gl.h', '(void)GL_LUMINANCE16', **kw))
