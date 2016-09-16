@@ -111,6 +111,11 @@ struct vo_cocoa_state {
     NSCursor *blankCursor;
 
     char *window_title;
+    
+    CVDisplayLinkRef link;
+    pthread_mutex_t sync_lock;
+    pthread_cond_t sync_wakeup;
+    uint64_t sync_counter;
 };
 
 static void run_on_main_thread(struct vo *vo, void(^block)(void))
@@ -253,6 +258,27 @@ static void cocoa_uninit_light_sensor(struct vo_cocoa_state *s)
     }
 }
 
+static void vo_cocoa_init_displaylink(struct vo *vo)
+{
+    struct vo_cocoa_state *s = vo->cocoa;
+    
+    NSScreen *screen = vo->opts->fullscreen ? s->fs_screen : s->current_screen;
+    NSDictionary* sinfo = [screen deviceDescription];
+    NSNumber* sid = [sinfo objectForKey:@"NSScreenNumber"];
+    CGDirectDisplayID did = [sid longValue];
+
+    CVDisplayLinkCreateWithCGDisplay(did, &s->link);
+    CVDisplayLinkSetOutputCallback(s->link, &displayLinkCallback, vo);
+    CVDisplayLinkStart(s->link);
+}
+
+static void vo_cocoa_uninit_displaylink(struct vo_cocoa_state *s)
+{
+    if (CVDisplayLinkIsRunning(s->link))
+        CVDisplayLinkStop(s->link);
+    CVDisplayLinkRelease(s->link);
+}
+
 void vo_cocoa_init(struct vo *vo)
 {
     struct vo_cocoa_state *s = talloc_zero(NULL, struct vo_cocoa_state);
@@ -268,6 +294,8 @@ void vo_cocoa_init(struct vo *vo)
     }
     pthread_mutex_init(&s->lock, NULL);
     pthread_cond_init(&s->wakeup, NULL);
+    pthread_mutex_init(&s->sync_lock, NULL);
+    pthread_cond_init(&s->sync_wakeup, NULL);
     vo->cocoa = s;
     cocoa_init_light_sensor(vo);
     cocoa_add_screen_reconfiguration_observer(vo);
@@ -308,6 +336,7 @@ void vo_cocoa_uninit(struct vo *vo)
 
     run_on_main_thread(vo, ^{
         enable_power_management(s);
+        vo_cocoa_uninit_displaylink(s);
         cocoa_uninit_light_sensor(s);
         cocoa_rm_fs_screen_profile_observer(s);
         cocoa_rm_screen_reconfiguration_observer(vo);
@@ -377,13 +406,9 @@ static void vo_cocoa_update_screen_fps(struct vo *vo)
     NSNumber* sid = [sinfo objectForKey:@"NSScreenNumber"];
     CGDirectDisplayID did = [sid longValue];
 
-    CVDisplayLinkRef link;
-    CVDisplayLinkCreateWithCGDisplay(did, &link);
-    CVDisplayLinkSetOutputCallback(link, &displayLinkCallback, NULL);
-    CVDisplayLinkStart(link);
-    CVDisplayLinkSetCurrentCGDisplay(link, did);
-
-    double display_period = CVDisplayLinkGetActualOutputVideoRefreshPeriod(link);
+    CVDisplayLinkSetCurrentCGDisplay(s->link, did);
+    
+    double display_period = CVDisplayLinkGetActualOutputVideoRefreshPeriod(s->link);
 
     if (display_period > 0) {
         s->screen_fps = 1/display_period;
@@ -392,14 +417,12 @@ static void vo_cocoa_update_screen_fps(struct vo *vo)
         // CVDisplayLinkGet *Actual* OutputVideoRefreshPeriod seems to
         // return 0 on some Apple devices. Use the nominal refresh period
         // instead.
-        const CVTime t = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link);
+        const CVTime t = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(s->link);
         if (!(t.flags & kCVTimeIsIndefinite)) {
             s->screen_fps = (t.timeScale / (double) t.timeValue);
             MP_VERBOSE(vo, "Falling back to %f for display sync.\n", s->screen_fps);
         }
     }
-
-    CVDisplayLinkRelease(link);
 
     flag_events(vo, VO_EVENT_WIN_STATE);
 }
@@ -408,6 +431,13 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink, const CVTimeSt
                                     const CVTimeStamp* outputTime, CVOptionFlags flagsIn,
                                     CVOptionFlags* flagsOut, void* displayLinkContext)
 {
+    struct vo *vo = displayLinkContext;
+    struct vo_cocoa_state *s = vo->cocoa;
+    
+    pthread_mutex_lock(&s->sync_lock);
+    s->sync_counter += 1;
+    pthread_cond_signal(&s->sync_wakeup);
+    pthread_mutex_unlock(&s->sync_lock);
     return kCVReturnSuccess;
 }
 
@@ -611,6 +641,7 @@ int vo_cocoa_config_window(struct vo *vo)
     run_on_main_thread(vo, ^{
         struct mp_rect screenrc;
         vo_cocoa_update_screen_info(vo, &screenrc);
+        vo_cocoa_init_displaylink(vo);
         vo_cocoa_update_screen_fps(vo);
 
         struct vo_win_geometry geo;
@@ -717,6 +748,13 @@ void vo_cocoa_swap_buffers(struct vo *vo)
     pthread_mutex_unlock(&s->lock);
     if (skip)
         return;
+
+    pthread_mutex_lock(&s->sync_lock);
+    uint64_t old_counter = s->sync_counter;
+    while(old_counter == s->sync_counter) {
+        pthread_cond_wait(&s->sync_wakeup, &s->sync_lock);
+    }
+    pthread_mutex_unlock(&s->sync_lock);
 
     CGLFlushDrawable(s->cgl_ctx);
 
