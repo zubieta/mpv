@@ -2789,7 +2789,7 @@ done:
     // The playloop calls this last before waiting some time until it decides
     // to call flip_page(). Tell OpenGL to start execution of the GPU commands
     // while we sleep (this happens asynchronously).
-    gl->Flush();
+    //gl->Flush();
 
     p->frames_rendered++;
 
