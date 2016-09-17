@@ -437,6 +437,7 @@ static CVReturn displayLinkCallback(CVDisplayLinkRef displayLink, const CVTimeSt
     pthread_mutex_lock(&s->sync_lock);
     s->sync_counter += 1;
     pthread_cond_signal(&s->sync_wakeup);
+    MP_STATS(vo, "displink");
     pthread_mutex_unlock(&s->sync_lock);
     return kCVReturnSuccess;
 }
@@ -748,15 +749,17 @@ void vo_cocoa_swap_buffers(struct vo *vo)
     pthread_mutex_unlock(&s->lock);
     if (skip)
         return;
-
+/*
     pthread_mutex_lock(&s->sync_lock);
     uint64_t old_counter = s->sync_counter;
     while(old_counter == s->sync_counter) {
         pthread_cond_wait(&s->sync_wakeup, &s->sync_lock);
     }
     pthread_mutex_unlock(&s->sync_lock);
-
+*/
+    MP_STATS(vo, "start flush");
     CGLFlushDrawable(s->cgl_ctx);
+    MP_STATS(vo, "end flush");
 
     pthread_mutex_lock(&s->lock);
     s->frame_w = vo->dwidth;
