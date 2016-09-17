@@ -750,7 +750,11 @@ void vo_cocoa_swap_buffers(struct vo *vo)
     if (skip)
         return;
 
-    static uint64_t old_counter;
+    MP_STATS(vo, "start flush");
+    CGLFlushDrawable(s->cgl_ctx);
+    MP_STATS(vo, "end flush");
+
+        static uint64_t old_counter;
 
     MP_STATS(vo, "start waitdisplink");
     pthread_mutex_lock(&s->sync_lock);
@@ -761,9 +765,6 @@ void vo_cocoa_swap_buffers(struct vo *vo)
     old_counter = s->sync_counter;
     MP_STATS(vo, "end waitdisplink");
 
-    MP_STATS(vo, "start flush");
-    CGLFlushDrawable(s->cgl_ctx);
-    MP_STATS(vo, "end flush");
 
     pthread_mutex_lock(&s->lock);
     s->frame_w = vo->dwidth;
