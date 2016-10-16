@@ -33,6 +33,9 @@
 #include <EGL/eglext.h>
 #endif
 
+// Generated from xdg-shell.xml
+#include "video/out/wayland/xdg-shell-protocol.h"
+
 struct vo;
 
 struct vo_wayland_output {
@@ -80,7 +83,7 @@ struct vo_wayland_state {
         struct wl_display *display;
         struct wl_registry *registry;
         struct wl_compositor *compositor;
-        struct wl_shell *shell;
+        struct zxdg_shell_v6 *shell;
 
         struct wl_list output_list;
         struct wl_output *fs_output; /* fullscreen output */
@@ -100,18 +103,19 @@ struct vo_wayland_state {
         int32_t p_height;
         int32_t sh_width; // sheduled width for resizing
         int32_t sh_height;
-        int32_t sh_x;     // x, y calculated with the drag edges for moving
-        int32_t sh_y;
         float aspect;
 
-        bool is_fullscreen; // don't keep aspect ratio in fullscreen mode
+        struct {
+            bool fullscreen; // don't keep aspect ratio in fullscreen mode
+        } state;
         int32_t fs_width;   // fullscreen sizes
         int32_t fs_height;
 
         struct wl_surface *video_surface;
+        struct zxdg_surface_v6 *xdg_surface;
+        struct zxdg_toplevel_v6 *xdg_toplevel;
         int32_t mouse_x; // mouse position inside the surface
         int32_t mouse_y;
-        struct wl_shell_surface *shell_surface;
         int events; /* mplayer events (VO_EVENT_RESIZE) */
     } window;
 

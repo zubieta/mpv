@@ -620,9 +620,14 @@ video_output_features = [
         'desc': 'GBM',
         'deps': [ 'gbm.h' ],
         'func': check_pkg_config('gbm'),
+    }, {
+        'name': '--wayland-scanner',
+        'desc': 'wayland-scanner',
+        'func': check_program('wayland-scanner', 'WAYSCAN')
     } , {
         'name': '--wayland',
         'desc': 'Wayland',
+        'deps': [ 'wayland-scanner' ],
         'func': check_pkg_config('wayland-client', '>= 1.6.0',
                                  'wayland-cursor', '>= 1.6.0',
                                  'xkbcommon',      '>= 0.3.0'),

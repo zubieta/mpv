@@ -85,6 +85,14 @@ def build(ctx):
         source = "demux/ebml.c",
         target = "ebml_defs.c")
 
+    if ctx.dependency_satisfied('wayland-scanner'):
+        ctx.wayland_protocol_code(
+            source = "video/out/wayland/protocol/xdg-shell.xml",
+            target = "video/out/wayland/xdg-shell-protocol.c")
+        ctx.wayland_protocol_header(
+            source = "video/out/wayland/protocol/xdg-shell.xml",
+            target = "video/out/wayland/xdg-shell-protocol.h")
+
     if ctx.env.DEST_OS == 'win32':
         main_fn_c = 'osdep/main-fn-win.c'
     elif ctx.dependency_satisfied('cocoa'):
@@ -386,6 +394,7 @@ def build(ctx):
         ( "video/out/wayland_common.c",          "wayland" ),
         ( "video/out/wayland/buffer.c",          "wayland" ),
         ( "video/out/wayland/memfile.c",         "wayland" ),
+        ( "video/out/wayland/xdg-shell-protocol.c", "wayland" ),
         ( "video/out/win_state.c"),
         ( "video/out/x11_common.c",              "x11" ),
         ( "video/out/drm_common.c",              "drm" ),

@@ -104,8 +104,6 @@ struct priv {
     int width;  // width of the original image
     int height;
 
-    int x, y; // coords for resizing
-
     struct wl_surface *osd_surfaces[MAX_OSD_PARTS];
     struct wl_subsurface *osd_subsurfaces[MAX_OSD_PARTS];
     shm_buffer_t *osd_buffers[MAX_OSD_PARTS];
@@ -250,8 +248,6 @@ static bool resize(struct priv *p)
         return false; // skip resizing if we can't guarantee pixel perfectness!
 
     int32_t scale = 1;
-    int32_t x = wl->window.sh_x;
-    int32_t y = wl->window.sh_y;
 
     if (wl->display.current_output)
         scale = wl->display.current_output->scale;
@@ -271,12 +267,6 @@ static bool resize(struct priv *p)
                                             wl->window.height,
                                             p->dst_w,
                                             p->dst_h);
-
-    if (x != 0)
-        x = wl->window.width - p->dst_w;
-
-    if (y != 0)
-        y = wl->window.height - p->dst_h;
 
     wl_surface_set_buffer_scale(wl->window.video_surface, scale);
     mp_sws_set_from_cmdline(p->sws, p->vo->opts->sws_opts);
@@ -312,8 +302,6 @@ static bool resize(struct priv *p)
         wl_region_destroy(opaque);
     }
 
-    p->x = x;
-    p->y = y;
     p->vo->want_redraw = true;
     return true;
 }
@@ -494,12 +482,9 @@ static void redraw(void *data, uint32_t time)
     struct priv *p = data;
 
     shm_buffer_t *buf = buffer_pool_get_front(&p->video_bufpool);
-    wl_surface_attach(p->wl->window.video_surface, buf->buffer, p->x, p->y);
+    wl_surface_attach(p->wl->window.video_surface, buf->buffer, 0, 0);
     wl_surface_damage(p->wl->window.video_surface, 0, 0, p->dst_w, p->dst_h);
     buffer_finalise_front(buf);
-
-    p->x = 0;
-    p->y = 0;
 }
 
 static void flip_page(struct vo *vo)

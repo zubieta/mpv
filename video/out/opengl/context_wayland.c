@@ -22,10 +22,6 @@
 
 static void egl_resize(struct vo_wayland_state *wl)
 {
-    int32_t x = wl->window.sh_x;
-    int32_t y = wl->window.sh_y;
-    int32_t width = wl->window.sh_width;
-    int32_t height = wl->window.sh_height;
     int32_t scale = 1;
 
     if (!wl->egl_context.egl_window)
@@ -34,32 +30,23 @@ static void egl_resize(struct vo_wayland_state *wl)
     if (wl->display.current_output)
         scale = wl->display.current_output->scale;
 
-    // get the real size of the window
-    // this improves moving the window while resizing it
-    wl_egl_window_get_attached_size(wl->egl_context.egl_window,
-                                    &wl->window.width,
-                                    &wl->window.height);
+    const int32_t width = wl->window.sh_width;
+    const int32_t height = wl->window.sh_height;
+
+    wl->vo->dwidth = scale*width;
+    wl->vo->dheight = scale*height;
 
     MP_VERBOSE(wl, "resizing %dx%d -> %dx%d\n", wl->window.width,
                                                 wl->window.height,
                                                 width,
                                                 height);
 
-    if (x != 0)
-        x = wl->window.width - width;
-
-    if (y != 0)
-        y = wl->window.height - height;
-
     wl_surface_set_buffer_scale(wl->window.video_surface, scale);
-    wl_egl_window_resize(wl->egl_context.egl_window, scale*width, scale*height, x, y);
+    wl_egl_window_resize(wl->egl_context.egl_window, scale*width, scale*height, 0, 0);
 
     wl->window.width = width;
     wl->window.height = height;
 
-    /* set size for mplayer */
-    wl->vo->dwidth  = scale*wl->window.width;
-    wl->vo->dheight = scale*wl->window.height;
     wl->vo->want_redraw = true;
 }
 
