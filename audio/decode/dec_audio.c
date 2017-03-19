@@ -40,8 +40,7 @@
 #include "audio/format.h"
 #include "audio/audio.h"
 #include "audio/audio_buffer.h"
-
-#include "audio/filter/af.h"
+#include "options/options.h"
 
 extern const struct ad_functions ad_lavc;
 

@@ -42,7 +42,6 @@
 #include "video/decode/dec_video.h"
 #include "video/decode/vd.h"
 #include "video/out/vo.h"
-#include "audio/filter/af.h"
 #include "audio/decode/dec_audio.h"
 
 #include "core.h"

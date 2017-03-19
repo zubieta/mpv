@@ -56,7 +56,6 @@
 #include "video/csputils.h"
 #include "audio/audio_buffer.h"
 #include "audio/out/ao.h"
-#include "audio/filter/af.h"
 #include "video/decode/dec_video.h"
 #include "audio/decode/dec_audio.h"
 #include "video/out/bitmap_packer.h"
@@ -1461,12 +1460,12 @@ static int mp_property_filter_metadata(void *ctx, struct m_property *prop,
                 return M_PROPERTY_UNAVAILABLE;
             struct vf_chain *vf = mpctx->vo_chain->vf;
             res = vf_control_by_label(vf, VFCTRL_GET_METADATA, &metadata, key);
-        } else if (strcmp(type, "af") == 0) {
+        } /*else if (strcmp(type, "af") == 0) {
             if (!(mpctx->ao_chain && mpctx->ao_chain->af))
                 return M_PROPERTY_UNAVAILABLE;
             struct af_stream *af = mpctx->ao_chain->af;
             res = af_control_by_label(af, AF_CONTROL_GET_METADATA, &metadata, key);
-        }
+        }*/
         switch (res) {
         case CONTROL_UNKNOWN:
             return M_PROPERTY_UNKNOWN;
@@ -1777,7 +1776,7 @@ static int mp_property_mixer_active(void *ctx, struct m_property *prop,
 {
     MPContext *mpctx = ctx;
     struct ao_chain *ao_c = mpctx->ao_chain;
-    return m_property_flag_ro(action, arg, ao_c && ao_c->af->initialized > 0);
+    return m_property_flag_ro(action, arg, ao_c /*&& ao_c->af->initialized > 0*/);
 }
 
 /// Volume (RW)
@@ -5429,10 +5428,10 @@ int run_command(struct MPContext *mpctx, struct mp_cmd *cmd, struct mpv_node *re
                                cmd->args[1].v.s, cmd->args[2].v.s);
 
     case MP_CMD_AF_COMMAND:
-        if (!mpctx->ao_chain)
+        //if (!mpctx->ao_chain)
             return -1;
-        return af_send_command(mpctx->ao_chain->af, cmd->args[0].v.s,
-                               cmd->args[1].v.s, cmd->args[2].v.s);
+        //return af_send_command(mpctx->ao_chain->af, cmd->args[0].v.s,
+        //                       cmd->args[1].v.s, cmd->args[2].v.s);
 
     case MP_CMD_SCRIPT_BINDING: {
         mpv_event_client_message event = {0};

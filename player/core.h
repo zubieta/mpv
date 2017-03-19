@@ -193,13 +193,17 @@ struct ao_chain {
     bool spdif_passthrough, spdif_failed;
     bool pts_reset;
 
-    struct af_stream *af;
+    //struct af_stream *af;
     struct ao *ao;
     struct mp_audio_buffer *ao_buffer;
     double ao_resume_time;
 
     // 1-element input frame queue.
     struct mp_audio *input_frame;
+    struct mp_audio *output_frame;
+
+    struct mp_audio swr_in, swr_out;
+    struct SwrContext *swr;
 
     // Last known input_mpi format (so vf can be reinitialized any time).
     struct mp_audio input_format;
