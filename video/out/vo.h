@@ -227,6 +227,74 @@ struct vo_frame {
     uint64_t frame_id;
 };
 
+// Note: all fields are usually initialized to 0 or -1 by the caller, so that
+// the callee does not need to touch unsupported fields.
+// Where possible, all values should be consistent and acquired atomically.
+// For async present, present_count must be valid, and one of the following
+// groups of fields must have all fields set:
+//  - present_count, predicted_present_time_us
+//  - present_count, predicted_present_count, hw_present_*, hw_last_vsync_*
+struct vo_frame_statistics {
+    // Increased on every vo_driver.flip_page call.
+    // You can reset this (and all other fields) to 0 to signal discontinuities.
+    // (OML_sync_control: SBC returned by glXGetSyncValuesOML().)
+    int64_t present_count;
+
+    // present_count + predicted number of frames it will take to display the
+    // frame.
+    // (OML_sync_control: glXSwapBuffersMscOML() return value, SBC + latency.)
+    int64_t predicted_present_count;
+
+    // Absolute time in mp_time_us() time at which the frame will most likely
+    // be shown. (This is like predicted_present_count, but can include the
+    // clock time offset to the vsync event.)
+    int64_t predicted_present_time_us;
+
+    // The present_count of the last frame that was actually displayed. This
+    // must be set to 0 if no frame was displayed yet.
+    // (OML_sync_control: SBC returned by glXGetSyncValuesOML().)
+    int64_t hw_present_count;
+
+    // The hardware vsync counter at the time the frame corresponding to the
+    // hw_present_count field was presented. (The hardware vsync counter is
+    // incremented on each display refresh, even if no frame is presented. This
+    // field contains the counter value when the frame was presented.)
+    // (OML_sync_control: MSC returned by glXGetSyncValuesOML().)
+    int64_t hw_present_vsync_count;
+
+    // Last known hardware vsync count. This could be either the last frame that
+    // was presented by the VO, or the last hardware vsync that happened (even
+    // if no frame was presented, or the last frame was presented at a hw vsync
+    // before this). In particular, hw_last_vsync_count > hw_present_vsync_count
+    // is possible (but < is not allowed).
+    // (OML_sync_control: always the same value as hw_present_vsync_count,
+    //  because it always refers to the last presented frame.)
+    int64_t hw_last_vsync_count;
+
+    // Absolute time in mp_time_us() time at which hw_last_vsync_count was
+    // incremented most recently. Graphics APIs will use something different
+    // than mp_time_us(), so you have to rebase the values to mp_time_us().
+    // (OML_sync_control: UST returned by glXGetSyncValuesOML().)
+    int64_t hw_last_vsync_time_us;
+
+    // The length of a display frame in microseconds. this doesn't not need to
+    // be set if VOCTRL_GET_DISPLAY_FPS returns a better value.
+    // (OML_sync_control: roughly what glXGetMscRateOML() returns.)
+    int64_t nominal_vsync_duration_us;
+};
+
+/*
+//simpler proposal
+struct vo_frame_statistics_simple {
+    // mp_time() time at which to display vsync
+    int64_t predicted_display_time_us;
+    // timing error for the most recently presented frame
+    // (we only expect display too late)
+    int64_t delayed_time_us;
+    int64_t nominal_vsync_duration_us;
+};
+*/
+
 struct vo_driver {
     // Encoding functionality, which can be invoked via --o only.
     bool encode;
@@ -282,8 +350,33 @@ struct vo_driver {
 
     /*
      * Blit/Flip buffer to the screen. Must be called after each frame!
+     *
+     * Normally, this will block until the next vsync event. VOs can also
+     * support async presentation, in which case they must also implement
+     * the get_frame_statistics and return enough data to allow interpolating
+     * the final display time of the frame.
+     *
+     * If async presentation is used, the player will try to present as many
+     * frames as possible without waiting. The function should block
      */
     void (*flip_page)(struct vo *vo);
+
+    /*
+     * Optional callback for retrieving frame statistics. Not setting this
+     * callback is equivalent to an empty callback (i.e. not setting any fields
+     * in the st parameter).
+     *
+     * This is required for async presentation, and also for correctly accounting
+     * for display latency (which is important for A/V sync).
+     *
+     * There is the danger of race conditions: the frame could be presented
+     * between flip_page and get_frame_statistics, or after the
+     * get_frame_statistics call. The backend must be aware of this situation,
+     * and provide enough information for this to be resolved. In practice,
+     * presentation lags behind by a specific delay that does normally not
+     * change radically.
+     */
+    void (*get_frame_statistics)(struct vo *vo, struct vo_frame_statistics *st);
 
     /* These optional callbacks can be provided if the GUI framework used by
      * the VO requires entering a message loop for receiving events and does

@@ -174,6 +174,12 @@ static void flip_page(struct vo *vo)
     }
 }
 
+static void get_frame_statistics(struct vo *vo, struct vo_frame_statistics *st)
+{
+    struct gl_priv *p = vo->priv;
+    mpgl_get_frame_statistics(p->glctx, st);
+}
+
 static int query_format(struct vo *vo, int format)
 {
     struct gl_priv *p = vo->priv;
@@ -429,6 +435,7 @@ const struct vo_driver video_out_opengl = {
     .control = control,
     .draw_frame = draw_frame,
     .flip_page = flip_page,
+    .get_frame_statistics = get_frame_statistics,
     .wait_events = wait_events,
     .wakeup = wakeup,
     .uninit = uninit,

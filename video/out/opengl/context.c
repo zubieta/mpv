@@ -251,6 +251,13 @@ void mpgl_swap_buffers(struct MPGLContext *ctx)
     ctx->driver->swap_buffers(ctx);
 }
 
+void mpgl_get_frame_statistics(struct MPGLContext *ctx,
+                               struct vo_frame_statistics *st)
+{
+    if (ctx->driver->get_frame_statistics)
+        ctx->driver->get_frame_statistics(ctx, st);
+}
+
 void mpgl_uninit(MPGLContext *ctx)
 {
     set_current_context(NULL);

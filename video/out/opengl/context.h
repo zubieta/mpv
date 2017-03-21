@@ -64,8 +64,12 @@ struct mpgl_driver {
     // Optional.
     void (*start_frame)(struct MPGLContext *ctx);
 
-    // Present the frame.
+    // Present/finish the frame. See vo_driver.flip_page for remarks.
     void (*swap_buffers)(struct MPGLContext *ctx);
+
+    // See vo_driver.get_frame_statistics for remarks.
+    void (*get_frame_statistics)(struct MPGLContext *ctx,
+                                 struct vo_frame_statistics *st);
 
     // This behaves exactly like vo_driver.control().
     int (*control)(struct MPGLContext *ctx, int *events, int request, void *arg);
@@ -106,6 +110,8 @@ int mpgl_reconfig_window(struct MPGLContext *ctx);
 int mpgl_control(struct MPGLContext *ctx, int *events, int request, void *arg);
 void mpgl_start_frame(struct MPGLContext *ctx);
 void mpgl_swap_buffers(struct MPGLContext *ctx);
+void mpgl_get_frame_statistics(struct MPGLContext *ctx,
+                               struct vo_frame_statistics *st);
 
 int mpgl_find_backend(const char *name);
 

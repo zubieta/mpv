@@ -165,6 +165,8 @@ struct vo_internal {
 static void forget_frames(struct vo *vo);
 static void *vo_thread(void *ptr);
 
+#define MP_VO_FRAME_STATISTICS_INIT { .present_count = -1, }
+
 static bool get_desc(struct m_obj_desc *dst, int index)
 {
     if (index >= MP_ARRAY_SIZE(video_out_drivers) - 1)
@@ -414,7 +416,8 @@ static void vsync_skip_detection(struct vo *vo)
 }
 
 // Always called locked.
-static void update_vsync_timing_after_swap(struct vo *vo)
+static void update_vsync_timing_after_swap(struct vo *vo,
+                                           struct vo_frame_statistics *st)
 {
     struct vo_internal *in = vo->in;
 
@@ -456,6 +459,44 @@ static void update_vsync_timing_after_swap(struct vo *vo)
 
     MP_STATS(vo, "value %f jitter", in->estimated_vsync_jitter);
     MP_STATS(vo, "value %f vsync-diff", in->vsync_samples[0] / 1e6);
+
+    if (st->present_count >= 0) {
+        int64_t present_time = 0;
+        if (st->predicted_present_time_us > 0) {
+            present_time = st->predicted_present_time_us;
+        } else if (st->predicted_present_count > 0 && st->hw_present_count > 0) {
+            // obviously both hw_present_* fields should be set if any is set
+            assert(st->hw_present_vsync_count);
+            // hw_last_vsync_count < hw_present_vsync_count not allowed
+            assert(st->hw_last_vsync_count >= st->hw_present_vsync_count);
+            // both hw_last_vsync_* fields should be set if any is set
+            assert(st->hw_last_vsync_time_us);
+            // obviously the predicted count must be higher than whatever what
+            // was shown already (or == if the frame was shown)
+            assert(st->predicted_present_count >= st->hw_present_count);
+
+            // this is optional here, but for now simplifies the mess below
+            assert(st->hw_last_vsync_time_us > 0);
+
+            // if hw_last_vsync_count is ahead of hw_present_vsync_count,
+            // get the time for hw_present_vsync_count
+            int64_t hw_present_time_us = st->hw_last_vsync_time_us -
+                (st->hw_last_vsync_count - st->hw_present_vsync_count)
+                    * st->hw_last_vsync_time_us;
+
+            present_time = hw_present_time_us -
+                (st->predicted_present_count - st->hw_present_count)
+                    * st->hw_last_vsync_time_us;
+        }
+
+        if (present_time) {
+            MP_WARN(vo, "present at: %lld\n", (long long)present_time);
+            MP_STATS(vo, "event-timed %lld present-time", (long long)present_time);
+        } else {
+            MP_WARN(vo, "present time unknown\n");
+            MP_STATS(vo, "signal present-unknown");
+        }
+    }
 }
 
 // to be called from VO thread only
@@ -829,11 +870,15 @@ static bool render_frame(struct vo *vo)
 
         MP_STATS(vo, "end video-flip");
 
+        struct vo_frame_statistics st = MP_VO_FRAME_STATISTICS_INIT;
+        if (vo->driver->get_frame_statistics)
+            vo->driver->get_frame_statistics(vo, &st);
+
         pthread_mutex_lock(&in->lock);
         in->dropped_frame = prev_drop_count < vo->in->drop_count;
         in->rendering = false;
 
-        update_vsync_timing_after_swap(vo);
+        update_vsync_timing_after_swap(vo, &st);
     }
 
     if (in->dropped_frame) {
