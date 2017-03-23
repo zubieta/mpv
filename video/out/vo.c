@@ -136,7 +136,9 @@ struct vo_internal {
     int num_vsync_samples;
     int64_t num_total_vsync_samples;
     int64_t prev_vsync;
+    int64_t real_prev_vsync;
     int64_t base_vsync;
+    int64_t latency_us;
     int drop_point;
     double estimated_vsync_interval;
     double estimated_vsync_jitter;
@@ -165,7 +167,7 @@ struct vo_internal {
 static void forget_frames(struct vo *vo);
 static void *vo_thread(void *ptr);
 
-#define MP_VO_FRAME_STATISTICS_INIT { .present_count = -1, }
+#define MP_VO_FRAME_STATISTICS_INIT { .most_recent_frame_id = -1, }
 
 static bool get_desc(struct m_obj_desc *dst, int index)
 {
@@ -331,6 +333,7 @@ static void reset_vsync_timings(struct vo *vo)
     struct vo_internal *in = vo->in;
     in->drop_point = 0;
     in->base_vsync = 0;
+    in->real_prev_vsync = 0;
     in->expecting_vsync = false;
     in->num_successive_vsyncs = 0;
 }
@@ -435,6 +438,33 @@ static void update_vsync_timing_after_swap(struct vo *vo,
     if (in->num_successive_vsyncs <= 2)
         return;
 
+    in->latency_us = 0;
+
+    if (st->most_recent_frame_id > 0) {
+        if (st->hw_visible_frame_id > 0) {
+            // this is probably not sane, but seems like an ok assumption in
+            // display sync mode
+            int64_t latency_frames =
+                st->most_recent_frame_id - st->hw_visible_frame_id;
+            int64_t predicted_time_us = st->hw_visible_frame_time_us +
+                latency_frames * in->vsync_interval;
+
+            in->latency_us = predicted_time_us - mp_time_us();
+
+            MP_WARN(vo, "present at: %lld (latency=%lld)\n",
+                    (long long)predicted_time_us,
+                    (long long)in->latency_us);
+            MP_STATS(vo, "event-timed %lld present-time", (long long)predicted_time_us);
+        } else {
+            MP_WARN(vo, "present time unknown\n");
+            MP_STATS(vo, "signal present-unknown");
+        }
+    }
+
+    // eh??
+    now += in->latency_us;
+    in->prev_vsync = now;
+
     if (in->num_vsync_samples >= MAX_VSYNC_SAMPLES)
         in->num_vsync_samples -= 1;
     MP_TARRAY_INSERT_AT(in, in->vsync_samples, in->num_vsync_samples, 0,
@@ -459,44 +489,6 @@ static void update_vsync_timing_after_swap(struct vo *vo,
 
     MP_STATS(vo, "value %f jitter", in->estimated_vsync_jitter);
     MP_STATS(vo, "value %f vsync-diff", in->vsync_samples[0] / 1e6);
-
-    if (st->present_count >= 0) {
-        int64_t present_time = 0;
-        if (st->predicted_present_time_us > 0) {
-            present_time = st->predicted_present_time_us;
-        } else if (st->predicted_present_count > 0 && st->hw_present_count > 0) {
-            // obviously both hw_present_* fields should be set if any is set
-            assert(st->hw_present_vsync_count);
-            // hw_last_vsync_count < hw_present_vsync_count not allowed
-            assert(st->hw_last_vsync_count >= st->hw_present_vsync_count);
-            // both hw_last_vsync_* fields should be set if any is set
-            assert(st->hw_last_vsync_time_us);
-            // obviously the predicted count must be higher than whatever what
-            // was shown already (or == if the frame was shown)
-            assert(st->predicted_present_count >= st->hw_present_count);
-
-            // this is optional here, but for now simplifies the mess below
-            assert(st->hw_last_vsync_time_us > 0);
-
-            // if hw_last_vsync_count is ahead of hw_present_vsync_count,
-            // get the time for hw_present_vsync_count
-            int64_t hw_present_time_us = st->hw_last_vsync_time_us -
-                (st->hw_last_vsync_count - st->hw_present_vsync_count)
-                    * st->hw_last_vsync_time_us;
-
-            present_time = hw_present_time_us -
-                (st->predicted_present_count - st->hw_present_count)
-                    * st->hw_last_vsync_time_us;
-        }
-
-        if (present_time) {
-            MP_WARN(vo, "present at: %lld\n", (long long)present_time);
-            MP_STATS(vo, "event-timed %lld present-time", (long long)present_time);
-        } else {
-            MP_WARN(vo, "present time unknown\n");
-            MP_STATS(vo, "signal present-unknown");
-        }
-    }
 }
 
 // to be called from VO thread only
@@ -1190,7 +1182,7 @@ double vo_get_delay(struct vo *vo)
     assert (!in->frame_queued);
     int64_t res = 0;
     if (in->base_vsync && in->vsync_interval > 1 && in->current_frame) {
-        res = in->base_vsync;
+        res = in->base_vsync + in->latency_us;
         int extra = !!in->rendering;
         res += (in->current_frame->num_vsyncs + extra) * in->vsync_interval;
         if (!in->current_frame->display_synced)

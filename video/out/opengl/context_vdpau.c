@@ -21,6 +21,7 @@
 #define MP_GET_GLX_WORKAROUNDS
 #include "header_fixes.h"
 
+#include "osdep/timer.h"
 #include "video/vdpau.h"
 #include "video/out/x11_common.h"
 #include "context.h"
@@ -32,6 +33,7 @@
 #define NUM_SURFACES 4
 
 struct surface {
+    int64_t frame_id;
     int w, h;
     VdpOutputSurface surface;
     // This nested shitshow of handles to the same object piss me off.
@@ -49,6 +51,7 @@ struct priv {
     int num_surfaces;
     struct surface surfaces[NUM_SURFACES];
     int current_surface;
+    int64_t frame_id;
 };
 
 typedef GLXContext (*glXCreateContextAttribsARBProc)
@@ -344,6 +347,8 @@ static void glx_start_frame(struct MPGLContext *ctx)
         gl->VDPAUMapSurfacesNV(1, &surface->registered);
         surface->mapped = true;
     }
+
+    p->frame_id++;
 }
 
 static void glx_swap_buffers(struct MPGLContext *ctx)
@@ -365,7 +370,54 @@ static void glx_swap_buffers(struct MPGLContext *ctx)
                                              0, 0, 0);
     CHECK_VDP_WARNING(ctx, "trying to present vdp surface");
 
+    surface->frame_id = p->frame_id;
+
     p->current_surface = (p->current_surface + 1) % p->num_surfaces;
+}
+
+static void glx_get_frame_statistics(struct MPGLContext *ctx,
+                                     struct vo_frame_statistics *st)
+{
+    struct priv *p = ctx->priv;
+    struct vdp_functions *vdp = &p->vdp->vdp;
+    VdpStatus vdp_st;
+
+    // Find the most recently displayed frame.
+    for (int n = 0; n < p->num_surfaces; n++) {
+        int index = p->current_surface - 1 - n;
+        while (index < 0)
+            index += p->num_surfaces;
+        index = index % p->num_surfaces;
+        struct surface *surface = &p->surfaces[index];
+
+        if (surface->surface == VDP_INVALID_HANDLE)
+            continue;
+
+        VdpPresentationQueueStatus status = 0;
+        VdpTime visible_time = 0;
+        vdp_st = vdp->presentation_queue_query_surface_status(p->vdp_queue,
+                                    surface->surface, &status, &visible_time);
+        CHECK_VDP_WARNING(ctx, "trying to present vdp queue status");
+
+        // A surface can be VISIBLE or IDLE (= was visible, or never queued).
+        // Checking for VISIBLE is racy, so we try to allow for IDLE too.
+        if (!visible_time || (status != VDP_PRESENTATION_QUEUE_STATUS_VISIBLE &&
+                              status != VDP_PRESENTATION_QUEUE_STATUS_QUEUED))
+            continue;
+
+        VdpTime now;
+        vdp_st = vdp->presentation_queue_get_time(p->vdp_queue, &now);
+        CHECK_VDP_WARNING(ctx, "getting current time failed");
+        if (!now)
+            break;
+
+        // Assume vdpau time is running roughly at the same speed as ours.
+        st->hw_visible_frame_time_us =
+            mp_time_us() + (now - visible_time + 500) / 1000;
+        st->hw_visible_frame_id = surface->frame_id;
+    }
+
+    st->most_recent_frame_id = p->frame_id;
 }
 
 static void glx_wakeup(struct MPGLContext *ctx)
@@ -385,6 +437,7 @@ const struct mpgl_driver mpgl_driver_vdpauglx = {
     .reconfig       = glx_reconfig,
     .start_frame    = glx_start_frame,
     .swap_buffers   = glx_swap_buffers,
+    .get_frame_statistics = glx_get_frame_statistics,
     .control        = glx_control,
     .wakeup         = glx_wakeup,
     .wait_events    = glx_wait_events,
