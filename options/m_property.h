@@ -154,18 +154,7 @@ bool m_property_split_path(const char *path, bstr *prefix, char **rem);
 void m_properties_print_help_list(struct mp_log *log,
                                   const struct m_property *list);
 
-// Expand a property string.
-// This function allows to print strings containing property values.
-//  ${NAME} is expanded to the value of property NAME.
-//  If NAME starts with '=', use the raw value of the property.
-//  ${NAME:STR} expands to the property, or STR if the property is not
-//  available.
-//  ${?NAME:STR} expands to STR if the property is available.
-//  ${!NAME:STR} expands to STR if the property is not available.
-// General syntax: "${" ["?" | "!"] ["="] NAME ":" STR "}"
-// STR is recursively expanded using the same rules.
-// "$$" can be used to escape "$", and "$}" to escape "}".
-// "$>" disables parsing of "$" for the rest of the string.
+// Expand a property string. Free result with talloc_free().
 char* m_properties_expand_string(const struct m_property *prop_list,
                                  const char *str, void *ctx);
 
