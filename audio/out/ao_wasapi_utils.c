@@ -25,6 +25,8 @@
 #include <ksmedia.h>
 #include <avrt.h>
 
+#include <semaphore.h>
+
 #include "audio/format.h"
 #include "osdep/timer.h"
 #include "osdep/io.h"
@@ -935,20 +937,198 @@ exit_label:
     return deviceID;
 }
 
+
+DEFINE_GUID(DEVINTERFACE_AUDIO_RENDER, 0xe6327cad, 0xdcec, 0x4949, 0xae, 0x8a, 0x99, 0x1e, 0x97, 0x6a, 0x79, 0xd2);
+
+DEFINE_GUID(IID_IActivateAudioInterfaceCompletionHandler, 0x41D949AB, 0x9862, 0x444A, 0x80, 0xF6, 0xC2, 0x61, 0x33, 0x4D, 0xA5, 0xEB);
+
+typedef struct IActivateAudioInterfaceAsyncOperation IActivateAudioInterfaceAsyncOperation;
+typedef struct IActivateAudioInterfaceCompletionHandler IActivateAudioInterfaceCompletionHandler;
+
+// MSDN
+typedef HRESULT WINAPI P_ActivateAudioInterfaceAsync(
+  _In_ LPCWSTR                                            deviceInterfacePath,
+  _In_ REFIID                                             riid,
+  _In_ PROPVARIANT                                        *activationParams,
+  _In_ IActivateAudioInterfaceCompletionHandler           *completionHandler,
+  _COM_Outptr_ IActivateAudioInterfaceAsyncOperation **createAsync
+);
+
+#undef  INTERFACE
+#define INTERFACE IActivateAudioInterfaceAsyncOperation
+DECLARE_INTERFACE_(IActivateAudioInterfaceAsyncOperation,IUnknown)
+{
+    BEGIN_INTERFACE
+
+#ifndef __cplusplus
+    /* IUnknown methods */
+    STDMETHOD(QueryInterface)(THIS_ REFIID riid, void **ppvObject) PURE;
+    STDMETHOD_(ULONG, AddRef)(THIS) PURE;
+    STDMETHOD_(ULONG, Release)(THIS) PURE;
+#endif
+
+    /* IActivateAudioInterfaceAsyncOperation methods */
+    STDMETHOD(GetActivateResult)(THIS_
+        HRESULT  *activateResult,
+        IUnknown **activatedInterface);
+
+    END_INTERFACE
+};
+#ifdef COBJMACROS
+#define IActivateAudioInterfaceAsyncOperation_QueryInterface(This,riid,ppvObject) (This)->lpVtbl->QueryInterface(This,riid,ppvObject)
+#define IActivateAudioInterfaceAsyncOperation_AddRef(This) (This)->lpVtbl->AddRef(This)
+#define IActivateAudioInterfaceAsyncOperation_Release(This) (This)->lpVtbl->Release(This)
+#define IActivateAudioInterfaceAsyncOperation_GetActivateResult(This,a,b) (This)->lpVtbl->GetActivateResult(This,a,b)
+#endif /*COBJMACROS*/
+
+#undef  INTERFACE
+#define INTERFACE IActivateAudioInterfaceCompletionHandler
+DECLARE_INTERFACE_(IActivateAudioInterfaceCompletionHandler,IUnknown)
+{
+    BEGIN_INTERFACE
+
+#ifndef __cplusplus
+    /* IUnknown methods */
+    STDMETHOD(QueryInterface)(THIS_ REFIID riid, void **ppvObject) PURE;
+    STDMETHOD_(ULONG, AddRef)(THIS) PURE;
+    STDMETHOD_(ULONG, Release)(THIS) PURE;
+#endif
+
+    /* IActivateAudioInterfaceCompletionHandler methods */
+    STDMETHOD(ActivateCompleted)(THIS_
+        IActivateAudioInterfaceAsyncOperation *activateOperation);
+
+    END_INTERFACE
+};
+#ifdef COBJMACROS
+#define IActivateAudioInterfaceCompletionHandler_QueryInterface(This,riid,ppvObject) (This)->lpVtbl->QueryInterface(This,riid,ppvObject)
+#define IActivateAudioInterfaceCompletionHandler_AddRef(This) (This)->lpVtbl->AddRef(This)
+#define IActivateAudioInterfaceCompletionHandler_Release(This) (This)->lpVtbl->Release(This)
+#define IActivateAudioInterfaceCompletionHandler_ActivateCompleted(This,a) (This)->lpVtbl->ActivateCompleted(This,a)
+#endif /*COBJMACROS*/
+
+typedef struct AICompletionHandler
+{
+    IActivateAudioInterfaceCompletionHandler handler; // must be the first field
+    struct ao *ao;
+    sem_t sem;
+} AICompletionHandler;
+
+static HRESULT STDMETHODCALLTYPE AICompletionHandler_QueryInterface(
+    IActivateAudioInterfaceCompletionHandler* This, REFIID riid, void **ppvObject)
+{
+    // Compatible with IActivateAudioInterfaceCompletionHandler and IUnknown
+    // Also, include the IID_IAgileObject marker interface.
+    if (IsEqualGUID(&IID_IActivateAudioInterfaceCompletionHandler, riid) ||
+        IsEqualGUID(&IID_IUnknown, riid) ||
+        IsEqualGUID(&IID_IAgileObject, riid))
+    {
+        *ppvObject = (void *)This;
+        return S_OK;
+    } else {
+        *ppvObject = NULL;
+        return E_NOINTERFACE;
+    }
+}
+
+// these are required, but not actually used
+static ULONG STDMETHODCALLTYPE AICompletionHandler_AddRef(
+    IActivateAudioInterfaceCompletionHandler *This)
+{
+    return 1;
+}
+
+// MSDN says it should free itself, but we're static
+static ULONG STDMETHODCALLTYPE AICompletionHandler_Release(
+    IActivateAudioInterfaceCompletionHandler *This)
+{
+    return 1;
+}
+
+static HRESULT STDMETHODCALLTYPE AICompletionHandler_ActivateCompleted(
+    IActivateAudioInterfaceCompletionHandler *This,
+    IActivateAudioInterfaceAsyncOperation *activateOperation)
+{
+    AICompletionHandler *handler = (AICompletionHandler *)This;
+
+    MP_VERBOSE(handler->ao, "waiting for device done\n");
+    sem_post(&handler->sem);
+
+    return S_OK;
+}
+
+static CONST_VTBL IActivateAudioInterfaceCompletionHandlerVtbl AICompletionHandlerVtbl = {
+    .QueryInterface = AICompletionHandler_QueryInterface,
+    .AddRef = AICompletionHandler_AddRef,
+    .Release = AICompletionHandler_Release,
+    .ActivateCompleted = AICompletionHandler_ActivateCompleted,
+};
+
 HRESULT wasapi_thread_init(struct ao *ao)
 {
     struct wasapi_state *state = ao->priv;
     MP_DBG(ao, "Init wasapi thread\n");
     int64_t retry_wait = 1;
-retry: ;
-    HRESULT hr = load_device(ao->log, &state->pDevice, state->deviceID);
-    EXIT_ON_ERROR(hr);
+    HRESULT hr;
 
-    MP_DBG(ao, "Activating pAudioClient interface\n");
-    hr = IMMDeviceActivator_Activate(state->pDevice, &IID_IAudioClient,
-                                     CLSCTX_ALL, NULL,
+retry: ;
+    if (state->deviceID) {
+        hr = load_device(ao->log, &state->pDevice, state->deviceID);
+        EXIT_ON_ERROR(hr);
+
+        MP_DBG(ao, "Activating pAudioClient interface\n");
+        hr = IMMDeviceActivator_Activate(state->pDevice, &IID_IAudioClient,
+                                         CLSCTX_ALL, NULL,
+                                         (void **)&state->pAudioClient);
+        EXIT_ON_ERROR(hr);
+    } else {
+        HANDLE dll = LoadLibraryW(L"mmdevapi.dll");
+        if (!dll) {
+            MP_FATAL(ao, "Could not load DLL.\n");
+            hr = S_FALSE;
+            goto exit_label;
+        }
+        P_ActivateAudioInterfaceAsync *ActivateAudioInterfaceAsync =
+            (void *)GetProcAddress(dll, "ActivateAudioInterfaceAsync");
+        if (!ActivateAudioInterfaceAsync) {
+            MP_FATAL(ao, "Could not load function.\n");
+            hr = S_FALSE;
+            goto exit_label;
+        }
+        wchar_t *s = NULL;
+        hr = StringFromIID(&DEVINTERFACE_AUDIO_RENDER, &s);
+        if (FAILED(hr))
+            goto exit_label;
+        AICompletionHandler compl = {.ao = ao};
+        compl.handler.lpVtbl = &AICompletionHandlerVtbl;
+        sem_init(&compl.sem, 0, 0);
+        IActivateAudioInterfaceAsyncOperation *asyncop = NULL;
+        hr = ActivateAudioInterfaceAsync(s, &IID_IAudioClient, NULL,
+                                         &compl.handler, &asyncop);
+        if (FAILED(hr))
+            goto exit_label;
+        MP_VERBOSE(ao, "waiting for device...\n");
+        sem_wait(&compl.sem);
+        HRESULT res_hr;
+        IUnknown *res_intf;
+        hr = IActivateAudioInterfaceAsyncOperation_GetActivateResult(asyncop,
+                                                                     &res_hr,
+                                                                     &res_intf);
+        if (FAILED(hr))
+            goto exit_label;
+        MP_VERBOSE(ao, "successfully got result\n");
+        if (!res_intf) {
+            hr = res_hr;
+            goto exit_label;
+        }
+
+        hr = IUnknown_QueryInterface(res_intf, &IID_IAudioClient,
                                      (void **)&state->pAudioClient);
-    EXIT_ON_ERROR(hr);
+        IUnknown_Release(res_intf);
+        IActivateAudioInterfaceAsyncOperation_Release(asyncop);
+        if (FAILED(hr))
+            goto exit_label;
+    }
 
     MP_DBG(ao, "Probing formats\n");
     if (!find_formats(ao)) {
