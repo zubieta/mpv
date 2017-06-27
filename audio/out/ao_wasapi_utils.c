@@ -684,11 +684,13 @@ reinit:
     init_session_display(state);
     init_volume_control(state);
 
+#if !HAVE_UWP
     state->hTask = AvSetMmThreadCharacteristics(L"Pro Audio", &(DWORD){0});
     if (!state->hTask) {
         MP_WARN(state, "Failed to set AV thread to Pro Audio: %s\n",
                 mp_LastError_to_str());
     }
+#endif
 
     return S_OK;
 exit_label:
@@ -991,6 +993,8 @@ void wasapi_thread_uninit(struct ao *ao)
     SAFE_RELEASE(state->pSessionControl);
     SAFE_RELEASE(state->pAudioClient);
     SAFE_RELEASE(state->pDevice);
+#if !HAVE_UWP
     SAFE_DESTROY(state->hTask, AvRevertMmThreadCharacteristics(state->hTask));
+#endif
     MP_DBG(ao, "Thread uninit done\n");
 }

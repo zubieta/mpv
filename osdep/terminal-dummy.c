@@ -1,6 +1,6 @@
 #include "terminal.h"
 
-int terminal_init(void)
+void terminal_init(void)
 {
 }
 
