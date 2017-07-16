@@ -41,6 +41,40 @@
 #define HAVE_OPAQUE_REF (LIBAVUTIL_VERSION_MICRO >= 100 && \
                          LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 47, 100))
 
+// Determine strides, plane sizes, and total required size for an image
+// allocation. Returns total size on success, <0 on error. Unused planes
+// are always set to 0 up until MP_MAX_PLANES-1.
+int mp_image_layout(int imgfmt, int w, int h, int stride_align,
+                    int out_stride[MP_MAX_PLANES],
+                    int out_plane_size[MP_MAX_PLANES])
+{
+    struct mp_imgfmt_desc desc = mp_imgfmt_get_desc(imgfmt);
+    struct mp_image_params params = {.imgfmt = imgfmt, .w = w, .h = h};
+
+    if (!mp_image_params_valid(&params) || desc.flags & MP_IMGFLAG_HWACCEL)
+        return -1;
+
+    // Note: for non-mod-2 4:2:0 YUV frames, we have to allocate an additional
+    //       top/right border. This is needed for correct handling of such
+    //       images in filter and VO code (e.g. vo_vdpau or vo_opengl).
+
+    for (int n = 0; n < MP_MAX_PLANES; n++) {
+        int alloc_w = mp_chroma_div_up(w, desc.xs[n]);
+        int alloc_h = MP_ALIGN_UP(h, 32) >> desc.ys[n];
+        int line_bytes = (alloc_w * desc.bpp[n] + 7) / 8;
+        out_stride[n] = FFALIGN(line_bytes, stride_align);
+        out_plane_size[n] = out_stride[n] * alloc_h;
+    }
+    if (desc.flags & MP_IMGFLAG_PAL)
+        out_plane_size[1] = MP_PALETTE_SIZE;
+
+    int sum = 0;
+    for (int n = 0; n < MP_MAX_PLANES; n++)
+        sum += out_plane_size[n];
+
+    return sum;
+}
+
 static bool mp_image_alloc_planes(struct mp_image *mpi)
 {
     assert(!mpi->planes[0]);
@@ -49,32 +83,22 @@ static bool mp_image_alloc_planes(struct mp_image *mpi)
     if (!mp_image_params_valid(&mpi->params) || mpi->fmt.flags & MP_IMGFLAG_HWACCEL)
         return false;
 
-    // Note: for non-mod-2 4:2:0 YUV frames, we have to allocate an additional
-    //       top/right border. This is needed for correct handling of such
-    //       images in filter and VO code (e.g. vo_vdpau or vo_opengl).
-
-    size_t plane_size[MP_MAX_PLANES];
-    for (int n = 0; n < MP_MAX_PLANES; n++) {
-        int alloc_h = MP_ALIGN_UP(mpi->h, 32) >> mpi->fmt.ys[n];
-        int line_bytes = (mp_image_plane_w(mpi, n) * mpi->fmt.bpp[n] + 7) / 8;
-        mpi->stride[n] = FFALIGN(line_bytes, SWS_MIN_BYTE_ALIGN);
-        plane_size[n] = mpi->stride[n] * alloc_h;
-    }
-    if (mpi->fmt.flags & MP_IMGFLAG_PAL)
-        plane_size[1] = MP_PALETTE_SIZE;
-
-    size_t sum = 0;
-    for (int n = 0; n < MP_MAX_PLANES; n++)
-        sum += plane_size[n];
+    int stride[MP_MAX_PLANES];
+    int plane_size[MP_MAX_PLANES];
+    int size = mp_image_layout(mpi->imgfmt, mpi->w, mpi->h, SWS_MIN_BYTE_ALIGN,
+                               stride, plane_size);
+    if (size < 0)
+        return false;
 
     // Note: mp_image_pool assumes this creates only 1 AVBufferRef.
-    mpi->bufs[0] = av_buffer_alloc(FFMAX(sum, 1));
+    mpi->bufs[0] = av_buffer_alloc(FFMAX(size, 1));
     if (!mpi->bufs[0])
         return false;
 
     uint8_t *data = mpi->bufs[0]->data;
     for (int n = 0; n < MP_MAX_PLANES; n++) {
         mpi->planes[n] = plane_size[n] ? data : NULL;
+        mpi->stride[n] = stride[n];
         data += plane_size[n];
     }
     return true;

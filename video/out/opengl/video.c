@@ -174,6 +174,12 @@ struct pass_info {
 
 #define PASS_INFO_MAX (SHADER_MAX_HOOKS + 32)
 
+struct dr_buffer {
+    void *ptr;
+    size_t size;
+    GLuint pbo;
+};
+
 struct gl_video {
     GL *gl;
 
@@ -213,6 +219,9 @@ struct gl_video {
     bool use_integer_conversion;
 
     struct video_image image;
+
+    struct dr_buffer *dr_buffers;
+    int num_dr_buffers;
 
     bool dumb_mode;
     bool forced_dumb_mode;
@@ -3105,11 +3114,34 @@ static bool pass_upload_image(struct gl_video *p, struct mp_image *mpi, uint64_t
 
         plane->flipped = mpi->stride[0] < 0;
 
+        struct dr_buffer *mapped = NULL;
+        for (int i = 0; i < p->num_dr_buffers; i++) {
+            struct dr_buffer *buffer = &p->dr_buffers[i];
+            if (mpi->planes[n] >= (uint8_t *)buffer->ptr &&
+                mpi->planes[n] < (uint8_t *)buffer->ptr + buffer->size)
+            {
+                mapped = buffer;
+                break;
+            }
+        }
+
         gl->BindTexture(plane->gl_target, plane->gl_texture);
-        gl_pbo_upload_tex(&plane->pbo, gl, p->opts.pbo, plane->gl_target,
-                          plane->gl_format, plane->gl_type, plane->w, plane->h,
-                          mpi->planes[n], mpi->stride[n],
+        if (mapped) {
+            assert(mapped->pbo > 0);
+            gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, mapped->pbo);
+            uintptr_t offset = mpi->planes[n] - (uint8_t *)mapped->ptr;
+            gl_upload_tex(gl, plane->gl_target,
+                          plane->gl_format, plane->gl_type,
+                          (void *)offset, mpi->stride[n],
                           0, 0, plane->w, plane->h);
+            gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        } else {
+            MP_WARN(p, "non-DR path!\n");
+            gl_pbo_upload_tex(&plane->pbo, gl, p->opts.pbo, plane->gl_target,
+                              plane->gl_format, plane->gl_type, plane->w, plane->h,
+                              mpi->planes[n], mpi->stride[n],
+                              0, 0, plane->w, plane->h);
+        }
         gl->BindTexture(plane->gl_target, 0);
     }
     gl_timer_stop(gl);
@@ -3340,6 +3372,9 @@ void gl_video_uninit(struct gl_video *p)
     mpgl_osd_destroy(p->osd);
 
     gl_set_debug_logger(gl, NULL);
+
+    // Should all have been unreffed already.
+    assert(!p->num_dr_buffers);
 
     talloc_free(p);
 }
@@ -3624,4 +3659,57 @@ void gl_video_set_hwdec(struct gl_video *p, struct gl_hwdec *hwdec)
 {
     p->hwdec = hwdec;
     unref_current_image(p);
+}
+
+void *gl_video_dr_alloc_buffer(struct gl_video *p, size_t size)
+{
+    GL *gl = p->gl;
+
+    if (gl->version < 440)
+        return NULL;
+
+    MP_TARRAY_GROW(p, p->dr_buffers, p->num_dr_buffers);
+    int index = p->num_dr_buffers++;
+    struct dr_buffer *buffer = &p->dr_buffers[index];
+
+    *buffer = (struct dr_buffer){
+        .size = size,
+    };
+
+    unsigned flags = GL_MAP_READ_BIT | GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT |
+                     GL_MAP_COHERENT_BIT;
+
+    gl->GenBuffers(1, &buffer->pbo);
+    gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
+    gl->BufferStorage(GL_PIXEL_UNPACK_BUFFER, size, NULL, flags);
+    buffer->ptr = gl->MapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, size, flags);
+    gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    if (!buffer->ptr) {
+        gl_check_error(p->gl, p->log, "mapping buffer");
+        gl->DeleteBuffers(1, &buffer->pbo);
+        MP_TARRAY_REMOVE_AT(p->dr_buffers, p->num_dr_buffers, index);
+        return NULL;
+    }
+
+    return buffer->ptr;
+};
+
+void gl_video_dr_free_buffer(struct gl_video *p, void *ptr)
+{
+    GL *gl = p->gl;
+
+    for (int n = 0; n < p->num_dr_buffers; n++) {
+        struct dr_buffer *buffer = &p->dr_buffers[n];
+        if (buffer->ptr == ptr) {
+            gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
+            gl->UnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+            gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+            gl->DeleteBuffers(1, &buffer->pbo);
+
+            MP_TARRAY_REMOVE_AT(p->dr_buffers, p->num_dr_buffers, n);
+            return;
+        }
+    }
+    // not found - that must not happen
+    assert(0);
 }

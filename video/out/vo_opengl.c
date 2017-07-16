@@ -83,6 +83,8 @@ struct gl_priv {
 
     GLsync vsync_fences[NUM_VSYNC_FENCES];
     int num_vsync_fences;
+
+    struct vo_synced_pool *dr_pool;
 };
 
 static void resize(struct gl_priv *p)
@@ -343,9 +345,34 @@ static void wait_events(struct vo *vo, int64_t until_time_us)
     }
 }
 
+static void *dr_alloc_buffer(void *user_opaque, size_t size)
+{
+    struct gl_video *renderer = user_opaque;
+    return gl_video_dr_alloc_buffer(renderer, size);
+}
+
+static void dr_free_buffer(void *user_opaque, void *ptr)
+{
+    struct gl_video *renderer = user_opaque;
+    gl_video_dr_free_buffer(renderer, ptr);
+}
+
+static struct mp_image *get_image(struct vo *vo, int imgfmt, int w, int h,
+                                  int stride_align)
+{
+    struct gl_priv *p = vo->priv;
+    return vo_synced_pool_get_image(p->dr_pool, imgfmt, w, h, stride_align);
+}
+
 static void uninit(struct vo *vo)
 {
     struct gl_priv *p = vo->priv;
+
+    // Hack to make it unref all images.
+    gl_video_set_hwdec(p->renderer, NULL);
+
+    // Will free all still pooled DR buffers.
+    talloc_free(p->dr_pool);
 
     gl_video_uninit(p->renderer);
     gl_hwdec_uninit(p->hwdec);
@@ -410,6 +437,9 @@ static int preinit(struct vo *vo)
                              vo->hwdec_devs, vo->opts->gl_hwdec_interop);
     gl_video_set_hwdec(p->renderer, p->hwdec);
 
+    p->dr_pool = vo_synced_pool_create(vo, p->renderer, dr_alloc_buffer,
+                                       dr_free_buffer);
+
     return 0;
 
 err_out:
@@ -427,6 +457,7 @@ const struct vo_driver video_out_opengl = {
     .query_format = query_format,
     .reconfig = reconfig,
     .control = control,
+    .get_image = get_image,
     .draw_frame = draw_frame,
     .flip_page = flip_page,
     .wait_events = wait_events,

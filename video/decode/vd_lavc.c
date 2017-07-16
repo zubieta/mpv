@@ -57,6 +57,7 @@
 #include "demux/packet.h"
 #include "video/csputils.h"
 #include "video/sws_utils.h"
+#include "video/out/vo.h"
 
 #if LIBAVCODEC_VERSION_MICRO >= 100
 #include <libavutil/mastering_display_metadata.h>
@@ -74,6 +75,7 @@ static void init_avctx(struct dec_video *vd, const char *decoder,
                        struct vd_lavc_hwdec *hwdec);
 static void uninit_avctx(struct dec_video *vd);
 
+static int get_buffer2_direct(AVCodecContext *avctx, AVFrame *pic, int flags);
 static int get_buffer2_hwdec(AVCodecContext *avctx, AVFrame *pic, int flags);
 static enum AVPixelFormat get_format_hwdec(struct AVCodecContext *avctx,
                                            const enum AVPixelFormat *pix_fmt);
@@ -597,6 +599,12 @@ static void init_avctx(struct dec_video *vd, const char *decoder,
         mp_set_avcodec_threads(vd->log, avctx, lavc_param->threads);
     }
 
+    if (!ctx->hwdec && vd->vo && vd->vo->driver->get_image) {
+        avctx->opaque = vd;
+        avctx->get_buffer2 = get_buffer2_direct;
+        avctx->thread_safe_callbacks = 1;
+    }
+
     avctx->flags |= lavc_param->bitexact ? AV_CODEC_FLAG_BITEXACT : 0;
     avctx->flags2 |= lavc_param->fast ? AV_CODEC_FLAG2_FAST : 0;
 
@@ -915,6 +923,56 @@ static enum AVPixelFormat get_format_hwdec(struct AVCodecContext *avctx,
     const char *name = av_get_pix_fmt_name(select);
     MP_VERBOSE(vd, "Requesting pixfmt '%s' from decoder.\n", name ? name : "-");
     return select;
+}
+
+static int get_buffer2_direct(AVCodecContext *avctx, AVFrame *pic, int flags)
+{
+    struct dec_video *vd = avctx->opaque;
+
+    assert(vd->vo);
+
+    int w = pic->width;
+    int h = pic->height;
+    int linesize_align[AV_NUM_DATA_POINTERS];
+    avcodec_align_dimensions2(avctx, &w, &h, linesize_align);
+
+    // We assume that different alignments are just different power-of-2s.
+    // Thus, a higher alignment always satisfies a lower alignment.
+    int stride_align = 0;
+    for (int n = 0; n < AV_NUM_DATA_POINTERS; n++)
+        stride_align = MPMAX(stride_align, linesize_align[n]);
+
+    int imgfmt = pixfmt2imgfmt(pic->format);
+    if (!imgfmt)
+        goto fallback;
+
+    struct mp_image *img = vo_get_image(vd->vo, imgfmt, w, h, stride_align);
+    if (!img)
+        goto fallback;
+
+    /*
+
+    AVFrame *new = mp_image_to_av_frame_and_unref(img);
+    if (!new)
+        goto fallback;
+
+    av_frame_move_ref(pic, new);
+    av_frame_free(&new);
+    */
+    // get_buffer2 callers seem very unappreciative of overwriting pic with a
+    // new reference, so move back the data only manually.
+    for (int n = 0; n < 4; n++) {
+        pic->data[n] = img->planes[n];
+        pic->linesize[n] = img->stride[n];
+        pic->buf[n] = img->bufs[n];
+        img->bufs[n] = NULL;
+    }
+    talloc_free(img);
+
+    return 0;
+
+fallback:
+    return avcodec_default_get_buffer2(avctx, pic, flags);
 }
 
 static int get_buffer2_hwdec(AVCodecContext *avctx, AVFrame *pic, int flags)

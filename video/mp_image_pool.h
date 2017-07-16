@@ -12,6 +12,8 @@ struct mp_image *mp_image_pool_get(struct mp_image_pool *pool, int fmt,
 void mp_image_pool_add(struct mp_image_pool *pool, struct mp_image *new);
 void mp_image_pool_clear(struct mp_image_pool *pool);
 
+int mp_image_pool_get_in_use(struct mp_image_pool *pool);
+
 void mp_image_pool_set_lru(struct mp_image_pool *pool);
 
 struct mp_image *mp_image_pool_get_no_alloc(struct mp_image_pool *pool, int fmt,

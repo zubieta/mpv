@@ -1246,6 +1246,15 @@ struct vo_frame *vo_frame_ref(struct vo_frame *frame)
     return new;
 }
 
+struct mp_image *vo_get_image(struct vo *vo, int imgfmt, int w, int h,
+                              int stride_align)
+{
+    if (!vo->driver->get_image)
+        return NULL;
+
+    return vo->driver->get_image(vo, imgfmt, w, h, stride_align);
+}
+
 /*
  * lookup an integer in a table, table must have 0 as the last key
  * param: key key to search for
@@ -1257,4 +1266,189 @@ int lookup_keymap_table(const struct mp_keymap *map, int key)
     while (map->from && map->from != key)
         map++;
     return map->to;
+}
+
+#include <libavutil/buffer.h>
+
+#include "video/mp_image_pool.h"
+
+struct vo_synced_pool {
+    struct vo *vo;
+
+    void *user_opaque;
+    void *(*get_buffer)(void *user_opaque, size_t size);
+    void (*free_buffer)(void *user_opaque, void *ptr);
+
+
+    // --- The following fields are protected by lock
+    pthread_mutex_t lock;
+    int pool_w, pool_h, pool_align, pool_imgfmt;
+    struct mp_image_pool *pool;
+};
+
+static void synced_pool_free(void *ptr)
+{
+    struct vo_synced_pool *p = ptr;
+
+    // We don't support keeping references from the pool after the pool was
+    // destroyed. While mp_image_pool normally supports this, the user's
+    // free_buffer callback won't.
+    int num = mp_image_pool_get_in_use(p->pool);
+    if (num)
+        fprintf(stderr, "in use: %d \n", num);
+    assert(!mp_image_pool_get_in_use(p->pool));
+
+    // This will also call the user's free_buffer for the remaining images.
+    talloc_free(p->pool);
+
+    pthread_mutex_destroy(&p->lock);
+}
+
+// This provides a thread-safe pool for allocating data from a thread-unsafe VO.
+// The provided callbacks will always be run on the VO (by blocking on the VO).
+// Doing the blocking/synchronization is the reason why it wants a VO pointer.
+//
+// This assumes that the buffer has a compatible layout, meaning the buffer can
+// contain the image data as in memory.
+//
+// This is a helper for implementing vo_driver.get_image.
+//
+//  vo: guess what
+//  user_opaque: first parameter for the following callbacks
+//  get_buffer: allocate and return persistently GPU mapped memory of the
+//              given size. returns NULL on failure.
+//  free_buffer: release memory returned by get_buffer (the ptr is the return
+//               value of a previous get_buffer call)
+//
+// Note that get_buffer/free_buffer can be freely interleaved - even if the
+// pool is reallocated due to a parameter change, it could keep some buffers
+// for a while.
+//
+// We leave it undefined whether the pool will use a single buffer allocation
+// for exactly 1 or possibly multiple images, or whether it will reuse buffers
+// for images with different formats.
+struct vo_synced_pool *vo_synced_pool_create(struct vo *vo, void *user_opaque,
+                        void *(*get_buffer)(void *user_opaque, size_t size),
+                        void (*free_buffer)(void *user_opaque, void *ptr))
+{
+    struct vo_synced_pool *p = talloc_ptrtype(NULL, p);
+    talloc_set_destructor(p, synced_pool_free);
+    *p = (struct vo_synced_pool){
+        .vo = vo,
+        .user_opaque = user_opaque,
+        .get_buffer = get_buffer,
+        .free_buffer = free_buffer,
+        .pool = mp_image_pool_new(64),
+    };
+
+    pthread_mutex_init(&p->lock, NULL);
+
+    return p;
+}
+
+struct cmd_params {
+    struct vo_synced_pool *p;
+    size_t size;
+    void *ptr;
+};
+
+static void vo_thread_alloc(void *ptr)
+{
+    struct cmd_params *params = ptr;
+    params->ptr = params->p->get_buffer(params->p->user_opaque, params->size);
+}
+
+static void vo_thread_free(void *ptr)
+{
+    struct cmd_params *params = ptr;
+    params->p->free_buffer(params->p->user_opaque, params->ptr);
+}
+
+static void free_dr_image(void *opaque, uint8_t *data)
+{
+    struct vo_synced_pool *p = opaque;
+
+    struct cmd_params params = {
+        .p = p,
+        .ptr = data,
+    };
+
+    // The image could be unreffed even on the VO thread. In practice, this
+    // matters most on VO destruction.
+    if (pthread_equal(p->vo->in->thread, pthread_self())) {
+        vo_thread_free(&params);
+    } else {
+        mp_dispatch_run(p->vo->in->dispatch, vo_thread_free, &params);
+    }
+}
+
+// Fully thread-safe allocator function. The only exception is that you must
+// not call this from the VO thread - doing so would deadlock it. If no image
+// is available, the VO will be locked, and the provided get_buffer callback is
+// invoked. If the format changes, this might do expensive pool reallocation.
+struct mp_image *vo_synced_pool_get_image(struct vo_synced_pool *p, int imgfmt,
+                                          int w, int h, int stride_align)
+{
+    struct mp_image *res = NULL;
+    pthread_mutex_lock(&p->lock);
+
+    // (For simplicity, we realloc on any parameter change, instead of trying
+    // to be clever.)
+    if (stride_align != p->pool_align || w != p->pool_w || h != p->pool_h ||
+        imgfmt != p->pool_imgfmt)
+    {
+        mp_image_pool_clear(p->pool);
+        p->pool_imgfmt = imgfmt;
+        p->pool_w = w;
+        p->pool_h = h;
+        p->pool_align = stride_align;
+    }
+
+    res = mp_image_pool_get_no_alloc(p->pool, imgfmt, w, h);
+    if (res)
+        goto done;
+
+    // Allocate a new picture.
+
+    int stride[MP_MAX_PLANES];
+    int plane_size[MP_MAX_PLANES];
+    int size = mp_image_layout(imgfmt, w, h, stride_align, stride, plane_size);
+    if (size < 0)
+        goto done;
+    int total_size = size + stride_align; // pad to make sure we can realign it
+
+    struct cmd_params params = {
+        .p = p,
+        .size = total_size,
+    };
+    mp_dispatch_run(p->vo->in->dispatch, vo_thread_alloc, &params);
+    void *ptr = params.ptr;
+    if (!ptr)
+        goto done;
+
+    uint8_t *cur = (uint8_t *)(void *)MP_ALIGN_UP((uintptr_t)ptr, stride_align);
+
+    res = mp_image_new_dummy_ref(NULL);
+    mp_image_setfmt(res, imgfmt);
+    mp_image_set_size(res, w, h);
+
+    for (int n = 0; n < MP_MAX_PLANES; n++) {
+        res->planes[n] = plane_size[n] ? cur : NULL;
+        res->stride[n] = stride[n];
+        cur += plane_size[n];
+    }
+
+    res->bufs[0] = av_buffer_create(ptr, size, free_dr_image, p, 0);
+    if (!res->bufs[0])
+        abort(); // tiny malloc OOM
+
+    // Now make the mp_image part of the pool. This requires doing magic to the
+    // image, so just add it to the pool and get it back to avoid dealing with
+    // magic ourselves.
+    mp_image_pool_add(p->pool, res);
+    res = mp_image_pool_get_no_alloc(p->pool, imgfmt, w, h);
+
+done:
+    pthread_mutex_unlock(&p->lock);
+    return res;
 }

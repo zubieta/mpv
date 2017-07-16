@@ -97,6 +97,23 @@ void mp_image_pool_clear(struct mp_image_pool *pool)
     pool->num_images = 0;
 }
 
+// Return number of images still referenced (but not free ones).
+// Racy, useful for debugging.
+int mp_image_pool_get_in_use(struct mp_image_pool *pool)
+{
+    int in_use = 0;
+    for (int n = 0; n < pool->num_images; n++) {
+        struct mp_image *img = pool->images[n];
+        struct image_flags *it = img->priv;
+        pool_lock();
+        assert(it->pool_alive);
+        if (it->referenced)
+            in_use++;
+        pool_unlock();
+    }
+    return in_use;
+}
+
 // This is the only function that is allowed to run in a different thread.
 // (Consider passing an image to another thread, which frees it.)
 static void unref_image(void *opaque, uint8_t *data)

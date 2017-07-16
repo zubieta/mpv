@@ -104,6 +104,10 @@ typedef struct mp_image {
 
 int mp_chroma_div_up(int size, int shift);
 
+int mp_image_layout(int imgfmt, int w, int h, int stride_align,
+                    int out_stride[MP_MAX_PLANES],
+                    int out_plane_size[MP_MAX_PLANES]);
+
 struct mp_image *mp_image_alloc(int fmt, int w, int h);
 void mp_image_copy(struct mp_image *dmpi, struct mp_image *mpi);
 void mp_image_copy_gpu(struct mp_image *dst, struct mp_image *src);
