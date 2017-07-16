@@ -933,7 +933,7 @@ static int get_buffer2_direct(AVCodecContext *avctx, AVFrame *pic, int flags)
 
     int w = pic->width;
     int h = pic->height;
-    int linesize_align[AV_NUM_DATA_POINTERS];
+    int linesize_align[AV_NUM_DATA_POINTERS] = {0};
     avcodec_align_dimensions2(avctx, &w, &h, linesize_align);
 
     // We assume that different alignments are just different power-of-2s.
