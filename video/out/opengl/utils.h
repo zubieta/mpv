@@ -195,8 +195,10 @@ struct ra {
     struct ra_fns *fns;
     void *priv;
 
-    // Supported GLSL shader version.
+    // Set by the RA backend on init: highest supported GLSL shader version.
     int glsl_version;
+    // Set by the RA backend on init: ES GLSL variant required.
+    bool glsl_es;
 
     // RA_CAP_* bit field. The RA backend must set supported features at init
     // time.
@@ -261,6 +263,8 @@ struct ra_tex_params {
                             // this requires creation of a FBO
     bool require_download;  // CPU->GPU transfer must be possible
     bool require_upload;    // GPU->CPU transfer must be possible
+    // XXX model this as separate buffers, or make staging textures an abstraction
+    //     (might be aligned better with actual GPU APIs)
     bool create_mapping;    // create a persistent mapping (ra_tex.map)
                             // only available if
     // When used as render source texture.
@@ -310,6 +314,7 @@ struct ra_renderpass_params {
     int vertex_stride;
 
     // Shader text, in GLSL. (Yes, you need a GLSL compiler.)
+    // These are complete shaders, including prelude and declarations.
     const char *vertex_shader;
     const char *frag_shader;
     const char *compute_shader; // I guess?
