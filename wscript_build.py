@@ -119,8 +119,26 @@ def build(ctx):
     ctx(features = "ebml_header", target = "ebml_types.h")
     ctx(features = "ebml_definitions", target = "ebml_defs.c")
 
+    def swift(task):
+        src = ' '.join(map((lambda x: x.abspath()), task.inputs))
+        tgt = task.outputs[0].abspath()
+        header = task.outputs[1].abspath()
+        cmd = 'swift -frontend -c -sdk `xcrun --sdk macosx --show-sdk-path` -enable-objc-interop -emit-objc-header -emit-objc-header-path %s -c -o %s %s' % (header, tgt, src)
+        print(cmd)
+        return task.exec_command(cmd)
+
+    ctx(
+        rule   = swift,
+        source = 'video/out/hello1.swift',
+        target = 'mpv_swift.o mpv_swift.h',
+        before = 'c',
+        always = True # for testing
+    )
+
+    ctx.env.append_value('LINKFLAGS', ['-L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift_static/macosx', '-Xlinker', '-force_load_swift_libs', '-lc++'])
+
     main_fn_c = ctx.pick_first_matching_dep([
-        ( "osdep/main-fn-cocoa.c",               "cocoa" ),
+        ( "build/mpv_swift.o osdep/main-fn-cocoa.c", "cocoa" ),
         ( "osdep/main-fn-unix.c",                "posix" ),
         ( "osdep/main-fn-win.c",                 "win32-desktop" ),
     ])

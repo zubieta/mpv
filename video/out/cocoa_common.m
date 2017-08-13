@@ -23,6 +23,7 @@
 #import <AppKit/AppKit.h>
 #include <mach/mach.h>
 
+#import "mpv_swift.h"
 #import "cocoa_common.h"
 #import "video/out/cocoa/window.h"
 #import "video/out/cocoa/events_view.h"
@@ -224,6 +225,8 @@ static void light_sensor_cb(void *ctx, io_service_t srv, natural_t mtype, void *
 static void cocoa_init_light_sensor(struct vo *vo)
 {
     run_on_main_thread(vo, ^{
+        [HelloA helloWorld];
+
         struct vo_cocoa_state *s = vo->cocoa;
         io_service_t srv = IOServiceGetMatchingService(
                 kIOMasterPortDefault, IOServiceMatching("AppleLMUController"));
