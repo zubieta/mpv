@@ -120,7 +120,6 @@ def build(ctx):
     ctx(features = "ebml_definitions", target = "ebml_defs.c")
 
     def swift(task):
-        task.no_errcheck_out =True # XXX: nasty
         src = ' '.join(map((lambda x: x.abspath()), task.inputs))
         bridge = ctx.path.find_node("video/out/swift_bridge.h")
         tgt = task.outputs[0].abspath()
