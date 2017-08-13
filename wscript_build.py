@@ -139,9 +139,9 @@ def build(ctx):
     ctx.env.append_value('LINKFLAGS', ['-L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift_static/macosx', '-Xlinker', '-force_load_swift_libs', '-lc++'])
 
     main_fn_c = ctx.pick_first_matching_dep([
-        ( "build/mpv_swift.o osdep/main-fn-cocoa.c", "cocoa" ),
-        ( "osdep/main-fn-unix.c",                "posix" ),
-        ( "osdep/main-fn-win.c",                 "win32-desktop" ),
+        ( "osdep/main-fn-cocoa.c", "cocoa" ),
+        ( "osdep/main-fn-unix.c",  "posix" ),
+        ( "osdep/main-fn-win.c",   "win32-desktop" ),
     ])
 
     getch2_c = ctx.pick_first_matching_dep([
@@ -544,6 +544,7 @@ def build(ctx):
             target       = "mpv",
             source       = main_fn_c,
             use          = ctx.dependencies_use() + ['objects'],
+            add_object   = "mpv_swift.o",
             includes     = _all_includes(ctx),
             features     = "c cprogram" + (" syms" if syms else ""),
             export_symbols_def = "libmpv/mpv.def", # for syms=True
