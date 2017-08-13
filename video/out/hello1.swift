@@ -1,7 +1,7 @@
-import Foundation
+import Cocoa
 
 class HelloA: NSObject {
-  static func helloWorld() {
-    print("hello from swift");
+  public static func helloWorld() {
+    print("hello from swift (1)");
   }
 }

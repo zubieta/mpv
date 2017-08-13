@@ -226,6 +226,7 @@ static void cocoa_init_light_sensor(struct vo *vo)
 {
     run_on_main_thread(vo, ^{
         [HelloA helloWorld];
+        [HelloB helloWorld];
 
         struct vo_cocoa_state *s = vo->cocoa;
         io_service_t srv = IOServiceGetMatchingService(

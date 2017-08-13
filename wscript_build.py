@@ -120,16 +120,17 @@ def build(ctx):
     ctx(features = "ebml_definitions", target = "ebml_defs.c")
 
     def swift(task):
+        task.no_errcheck_out =True # XXX: nasty
         src = ' '.join(map((lambda x: x.abspath()), task.inputs))
+        bridge = ctx.path.find_node("video/out/swift_bridge.h")
         tgt = task.outputs[0].abspath()
         header = task.outputs[1].abspath()
-        cmd = 'swift -frontend -c -sdk `xcrun --sdk macosx --show-sdk-path` -enable-objc-interop -emit-objc-header -emit-objc-header-path %s -c -o %s %s' % (header, tgt, src)
-        print(cmd)
+        cmd = 'swift -frontend -c -sdk `xcrun --sdk macosx --show-sdk-path` -import-objc-header %s -enable-objc-interop -emit-objc-header -emit-objc-header-path %s -parse-as-library -c -o %s %s' % (bridge, header, tgt, src)
         return task.exec_command(cmd)
 
     ctx(
         rule   = swift,
-        source = 'video/out/hello1.swift',
+        source = 'video/out/hello1.swift video/out/hello2.swift',
         target = 'mpv_swift.o mpv_swift.h',
         before = 'c',
         always = True # for testing
