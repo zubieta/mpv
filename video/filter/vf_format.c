@@ -46,6 +46,8 @@ struct vf_priv_s {
     int rotate;
     int dw, dh;
     double dar;
+    int spherical;
+    int spherical_ref_angles[3];
 };
 
 static bool is_compatible(int fmt1, int fmt2)
@@ -127,6 +129,13 @@ static int reconfig(struct vf_instance *vf, struct mp_image_params *in,
         dsize = av_d2q(p->dar, INT_MAX);
     mp_image_params_set_dsize(out, dsize.num, dsize.den);
 
+    if (p->spherical)
+        out->spherical.type = p->spherical;
+    for (int n = 0; n < 3; n++) {
+        if (p->spherical_ref_angles[n] != -1000)
+            out->spherical.ref_angles[n] = p->spherical_ref_angles[n];
+    }
+
     // Make sure the user-overrides are consistent (no RGB csp for YUV, etc.).
     mp_image_params_guess_csp(out);
 
@@ -165,6 +174,10 @@ static const m_option_t vf_opts_fields[] = {
     OPT_INT("dw", dw, 0),
     OPT_INT("dh", dh, 0),
     OPT_DOUBLE("dar", dar, 0),
+    OPT_CHOICE_C("spherical", spherical, 0, mp_spherical_names),
+    OPT_INT("spherical-yaw", spherical_ref_angles[0], 0),
+    OPT_INT("spherical-pitch", spherical_ref_angles[1], 0),
+    OPT_INT("spherical-roll", spherical_ref_angles[1], 0),
     OPT_REMOVED("outputlevels", "use the --video-output-levels global option"),
     OPT_REMOVED("peak", "use sig-peak instead (changed value scale!)"),
     {0}
@@ -178,5 +191,6 @@ const vf_info_t vf_info_format = {
     .options = vf_opts_fields,
     .priv_defaults = &(const struct vf_priv_s){
         .rotate = -1,
+        .spherical_ref_angles = {-1000, -1000, -1000},
     },
 };
