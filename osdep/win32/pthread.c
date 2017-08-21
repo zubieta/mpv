@@ -115,7 +115,7 @@ int pthread_cond_wait(pthread_cond_t *restrict cond,
 }
 
 static pthread_mutex_t pthread_table_lock = PTHREAD_MUTEX_INITIALIZER;
-static struct m_thread_info *pthread_table;
+static struct m_thread_info **pthread_table;
 size_t pthread_table_num;
 
 struct m_thread_info {
@@ -128,61 +128,66 @@ struct m_thread_info {
 
 static struct m_thread_info *find_thread_info(DWORD id)
 {
+    pthread_mutex_lock(&pthread_table_lock);
+    struct m_thread_info *res = NULL;
     for (int n = 0; n < pthread_table_num; n++) {
-        if (id == pthread_table[n].id)
-            return &pthread_table[n];
+        if (pthread_table[n]->id == id) {
+            res = pthread_table[n];
+            break;
+        }
     }
-    return NULL;
+    pthread_mutex_unlock(&pthread_table_lock);
+    return res;
 }
 
 static void remove_thread_info(struct m_thread_info *info)
 {
-    assert(pthread_table_num);
-    assert(info >= &pthread_table[0] && info < &pthread_table[pthread_table_num]);
+    pthread_mutex_lock(&pthread_table_lock);
 
-    pthread_table[info - pthread_table] = pthread_table[pthread_table_num - 1];
-    pthread_table_num -= 1;
+    assert(pthread_table_num);
+
+    for (int n = 0; n < pthread_table_num; n++) {
+        if (pthread_table[n] == info) {
+            pthread_table[n] = pthread_table[pthread_table_num - 1];
+            pthread_table_num -= 1;
+            info = NULL;
+        }
+    }
+
+    assert(!info); // fails if not found
 
     // Avoid upsetting leak detectors.
     if (pthread_table_num == 0) {
         free(pthread_table);
         pthread_table = NULL;
     }
+
+    pthread_mutex_unlock(&pthread_table_lock);
 }
 
 void pthread_exit(void *retval)
 {
-    pthread_mutex_lock(&pthread_table_lock);
     struct m_thread_info *info = find_thread_info(pthread_self());
     assert(info); // not started with pthread_create, or pthread_join() race
     info->res = retval;
     if (!info->handle)
         remove_thread_info(info); // detached case
-    pthread_mutex_unlock(&pthread_table_lock);
 
     ExitThread(0);
 }
 
 int pthread_join(pthread_t thread, void **retval)
 {
-    pthread_mutex_lock(&pthread_table_lock);
     struct m_thread_info *info = find_thread_info(thread);
     assert(info); // not started with pthread_create, or pthread_join() race
-    HANDLE h = info->handle;
-    assert(h); // thread was detached
-    pthread_mutex_unlock(&pthread_table_lock);
+    assert(info->handle); // thread was detached
 
-    WaitForSingleObject(h, INFINITE);
+    WaitForSingleObject(info->handle, INFINITE);
 
-    pthread_mutex_lock(&pthread_table_lock);
-    info = find_thread_info(thread);
-    assert(info);
-    assert(info->handle == h);
-    CloseHandle(h);
+    CloseHandle(info->handle);
     if (retval)
         *retval = info->res;
     remove_thread_info(info);
-    pthread_mutex_unlock(&pthread_table_lock);
 
     return 0;
 }
@@ -192,24 +197,18 @@ int pthread_detach(pthread_t thread)
     if (!pthread_equal(thread, pthread_self()))
         abort(); // restriction of this wrapper
 
-    pthread_mutex_lock(&pthread_table_lock);
     struct m_thread_info *info = find_thread_info(thread);
     assert(info); // not started with pthread_create
     assert(info->handle); // already detached
     CloseHandle(info->handle);
     info->handle = NULL;
-    pthread_mutex_unlock(&pthread_table_lock);
 
     return 0;
 }
 
 static DWORD WINAPI run_thread(LPVOID lpParameter)
 {
-    pthread_mutex_lock(&pthread_table_lock);
-    struct m_thread_info *info = find_thread_info(pthread_self());
-    assert(info);
-    pthread_mutex_unlock(&pthread_table_lock);
-
+    struct m_thread_info *info = lpParameter;
     pthread_exit(info->user_fn(info->user_arg));
     abort(); // not reached
 }
@@ -217,30 +216,31 @@ static DWORD WINAPI run_thread(LPVOID lpParameter)
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
                    void *(*start_routine) (void *), void *arg)
 {
-    int res = 0;
+    int res = EAGAIN;
     pthread_mutex_lock(&pthread_table_lock);
     void *nalloc =
         realloc(pthread_table, (pthread_table_num + 1) * sizeof(pthread_table[0]));
-    if (!nalloc) {
-        res = EAGAIN;
+    if (!nalloc)
         goto done;
-    }
     pthread_table = nalloc;
+    struct m_thread_info *info = calloc(sizeof(*info), 1);
+    if (!info)
+        goto done;
+    pthread_table[pthread_table_num] = info;
     pthread_table_num += 1;
-    struct m_thread_info *info = &pthread_table[pthread_table_num - 1];
     *info = (struct m_thread_info) {
         .user_fn = start_routine,
         .user_arg = arg,
     };
-    info->handle = CreateThread(NULL, 0, run_thread, NULL, CREATE_SUSPENDED,
+    info->handle = CreateThread(NULL, 0, run_thread, info, CREATE_SUSPENDED,
                                 &info->id);
     if (!info->handle) {
         remove_thread_info(info);
-        res = EAGAIN;
         goto done;
     }
     *thread = info->id;
     ResumeThread(info->handle);
+    res = 0;
 done:
     pthread_mutex_unlock(&pthread_table_lock);
     return res;
