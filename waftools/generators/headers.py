@@ -17,7 +17,7 @@ def __escape_c_string(s):
 def __get_features_string__(ctx):
     import inflector
     stuff = []
-    for dependency_identifier in ctx.satisfied_deps:
+    for dependency_identifier in ctx.env.satisfied_deps:
         defkey = inflector.define_key(dependency_identifier)
         if ctx.is_defined(defkey) and ctx.get_define(defkey) == "1":
             stuff.append(dependency_identifier)

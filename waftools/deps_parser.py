@@ -1,3 +1,4 @@
+import itertools
 
 class ParseError(Exception):
     pass
@@ -142,6 +143,20 @@ def convert_dnf(ast):
         return ast
 
     return redist(flatten(simplify_negation(ast)))
+
+# returns all the AstSym names
+def symbols_list(expr):
+    def flatten(lst):
+        return list(itertools.chain.from_iterable(lst))
+
+    ast = parse_expr(expr)
+    def eval_ast(ast):
+        if isinstance(ast, AstSym):
+            return [ast.name]
+        elif isinstance(ast, AstOp):
+            return flatten([eval_ast(x) for x in ast.sub])
+        assert False
+    return eval_ast(ast)
 
 # Returns (success_as_bool, failure_reason_as_string)
 def check_dependency_expr(expr, deps):

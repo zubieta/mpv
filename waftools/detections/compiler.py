@@ -12,8 +12,14 @@ def __get_cc_env_vars__(cc):
         return ""
 
 def __test_and_add_flags__(ctx, flags):
-    for flag in flags:
-        ctx.check_cc(cflags=flag, uselib_store="compiler", mandatory=False)
+    def _mapf(flag):
+        return {
+            'cflags': flag,
+            'uselib_store': 'compiler',
+            'mandatory': False,
+            'msg': 'Checking for compiler header ' + flag,
+        }
+    ctx.multicheck(*map(_mapf, flags), msg = 'Checking for compiler headers...')
     ctx.env.CFLAGS += ctx.env.CFLAGS_compiler
 
 def __add_generic_flags__(ctx):

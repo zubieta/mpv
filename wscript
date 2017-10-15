@@ -1053,18 +1053,13 @@ def configure(ctx):
         while re.match('\$\{([^}]+)\}', ctx.env[varname]):
             ctx.env[varname] = Utils.subst_vars(ctx.env[varname], ctx.env)
 
-    ctx.parse_dependencies(build_options)
-    ctx.parse_dependencies(main_dependencies)
-    ctx.parse_dependencies(audio_output_features)
-    ctx.parse_dependencies(video_output_features)
-    ctx.parse_dependencies(libav_dependencies)
-    ctx.parse_dependencies(hwaccel_features)
-    ctx.parse_dependencies(radio_and_tv_features)
-
     if ctx.options.LUA_VER:
         ctx.options.enable_lua = True
 
-    ctx.parse_dependencies(standalone_features)
+    ctx.parse_dependencies(
+        build_options + main_dependencies + audio_output_features +
+        video_output_features + libav_dependencies + hwaccel_features +
+        radio_and_tv_features + standalone_features)
 
     ctx.load('generators.headers')
 
@@ -1080,8 +1075,6 @@ def configure(ctx):
         # up the libmpv symbols from the binary. We still restrict the set
         # of exported symbols via mpv.def.
         ctx.env.LINKFLAGS += ['-rdynamic']
-
-    ctx.store_dependencies_lists()
 
 def __write_version__(ctx):
     ctx.env.VERSIONH_ST = '--versionh="%s"'
