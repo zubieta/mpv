@@ -176,6 +176,7 @@ struct input_opts {
     int ar_rate;
     int use_alt_gr;
     int use_appleremote;
+    int use_gamepad;
     int use_media_keys;
     int default_bindings;
     int enable_mouse_movements;
@@ -202,6 +203,9 @@ const struct m_sub_options input_config = {
 #if HAVE_COCOA
         OPT_FLAG("input-appleremote", use_appleremote, 0),
 #endif
+#if HAVE_GAMEPAD
+        OPT_FLAG("input-gamepad", use_gamepad, 0),
+#endif
         OPT_FLAG("window-dragging", allow_win_drag, 0),
         OPT_REPLACED("input-x11-keyboard", "input-vo-keyboard"),
         {0}
@@ -217,6 +221,9 @@ const struct m_sub_options input_config = {
         .use_media_keys = 1,
 #if HAVE_COCOA
         .use_appleremote = 1,
+#endif
+#if HAVE_GAMEPAD
+        .use_gamepad = 1,
 #endif
         .default_bindings = 1,
         .vo_key_input = 1,
@@ -1393,6 +1400,12 @@ void mp_input_load_config(struct input_ctx *ictx)
 #if HAVE_WIN32_PIPES
     if (ictx->global->opts->input_file && *ictx->global->opts->input_file)
         mp_input_pipe_add(ictx, ictx->global->opts->input_file);
+#endif
+
+#if HAVE_GAMEPAD
+    if (ictx->opts->use_gamepad) {
+        mp_input_gamepad_add(ictx);
+    }
 #endif
 
     input_unlock(ictx);

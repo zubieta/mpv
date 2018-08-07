@@ -306,6 +306,7 @@ def build(ctx):
         ( ipc_c ),
         ( "input/keycodes.c" ),
         ( "input/pipe-win32.c",                  "win32-pipes" ),
+        ( "input/gamepad.c",                     "gamepad" ),
 
         ## Misc
         ( "misc/bstr.c" ),
