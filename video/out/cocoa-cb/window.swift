@@ -70,17 +70,10 @@ class Window: NSWindow, NSWindowDelegate {
                   styleMask: [.titled, .closable, .miniaturizable, .resizable],
                   backing: .buffered, defer: false, screen: screen)
 
-        // workaround for an AppKit bug where the NSWindow can't be placed on a
-        // none Main screen NSScreen outside the Main screen's frame bounds
-        if let wantedScreen = screen, screen != NSScreen.main() {
-            var absoluteWantedOrigin = contentRect.origin
-            absoluteWantedOrigin.x += wantedScreen.frame.origin.x
-            absoluteWantedOrigin.y += wantedScreen.frame.origin.y
-
-            if !NSEqualPoints(absoluteWantedOrigin, self.frame.origin) {
-                self.setFrameOrigin(absoluteWantedOrigin)
-            }
-        }
+        var absoluteWantedOrigin = contentRect.origin
+        absoluteWantedOrigin.x += screen!.frame.origin.x
+        absoluteWantedOrigin.y += screen!.frame.origin.y
+        self.setFrameOrigin(absoluteWantedOrigin)
 
         cocoaCB = ccb
         title = cocoaCB.title
@@ -161,7 +154,7 @@ class Window: NSWindow, NSWindowDelegate {
         NSAnimationContext.runAnimationGroup({ (context) -> Void in
             context.duration = getFsAnimationDuration(duration - 0.05)
             window.animator().setFrame(tScreen.frame, display: true)
-        }, completionHandler: { })
+                                             }, completionHandler: { })
     }
 
     func window(_ window: NSWindow, startCustomAnimationToExitFullScreenWithDuration duration: TimeInterval) {
@@ -176,7 +169,7 @@ class Window: NSWindow, NSWindowDelegate {
         NSAnimationContext.runAnimationGroup({ (context) -> Void in
             context.duration = getFsAnimationDuration(duration - 0.05)
             window.animator().setFrame(newFrame, display: true)
-        }, completionHandler: { })
+                                             }, completionHandler: { })
     }
 
     func windowDidEnterFullScreen(_ notification: Notification) {
@@ -214,7 +207,7 @@ class Window: NSWindow, NSWindowDelegate {
             NSAnimationContext.runAnimationGroup({ (context) -> Void in
                 context.duration = 0.01
                 self.animator().setFrame(newFrame, display: true)
-            }, completionHandler: nil )
+                                                 }, completionHandler: nil )
         }
 
         isAnimating = false
@@ -349,10 +342,10 @@ class Window: NSWindow, NSWindowDelegate {
         // calculate visible area of every side
         let left = newFrame.origin.x - unfsScreenFrame.origin.x
         let right = unfsScreenFrame.size.width -
-            (newFrame.origin.x - unfsScreenFrame.origin.x + newFrame.size.width)
+        (newFrame.origin.x - unfsScreenFrame.origin.x + newFrame.size.width)
         let bottom = newFrame.origin.y - unfsScreenFrame.origin.y
         let top = unfsScreenFrame.size.height -
-            (newFrame.origin.y - unfsScreenFrame.origin.y + newFrame.size.height)
+        (newFrame.origin.y - unfsScreenFrame.origin.y + newFrame.size.height)
 
         // normalize visible areas, decide which one to take horizontal/vertical
         var xPer = (unfsScreenFrame.size.width - visibleWindow.size.width)
@@ -362,13 +355,13 @@ class Window: NSWindow, NSWindowDelegate {
 
         // calculate visible area for every side for target screen
         let xNewLeft = targetFrame.origin.x +
-            (targetFrame.size.width - visibleWindow.size.width) * xPer
+        (targetFrame.size.width - visibleWindow.size.width) * xPer
         let xNewRight = targetFrame.origin.x + targetFrame.size.width -
-            (targetFrame.size.width - visibleWindow.size.width) * xPer - newFrame.size.width
+        (targetFrame.size.width - visibleWindow.size.width) * xPer - newFrame.size.width
         let yNewBottom = targetFrame.origin.y +
-            (targetFrame.size.height - visibleWindow.size.height) * yPer
+        (targetFrame.size.height - visibleWindow.size.height) * yPer
         let yNewTop = targetFrame.origin.y + targetFrame.size.height -
-            (targetFrame.size.height - visibleWindow.size.height) * yPer - newFrame.size.height
+        (targetFrame.size.height - visibleWindow.size.height) * yPer - newFrame.size.height
 
         // calculate new coordinates, decide which one to take horizontal/vertical
         newFrame.origin.x = left >= 0 || right < 0 ? xNewLeft : xNewRight
@@ -376,9 +369,9 @@ class Window: NSWindow, NSWindowDelegate {
 
         // don't place new window on top of a visible menubar
         let topMar = targetFrame.size.height -
-            (newFrame.origin.y - targetFrame.origin.y + newFrame.size.height)
+        (newFrame.origin.y - targetFrame.origin.y + newFrame.size.height)
         let menuBarHeight = targetFrame.size.height -
-            (targetVisibleFrame.size.height + targetVisibleFrame.origin.y)
+        (targetVisibleFrame.size.height + targetVisibleFrame.origin.y)
         if topMar < menuBarHeight {
             newFrame.origin.y -= top - menuBarHeight
         }
